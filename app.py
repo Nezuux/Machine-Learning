@@ -6,9 +6,8 @@ import os
 from PIL import Image
 from torchvision import transforms
 from transformers import AutoModelForImageClassification
-from pytorch_grad_cam import GradCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image
 from datetime import datetime
+import matplotlib.cm as cm
 
 st.set_page_config(
     page_title='SDIS 44 - Vigie IA Feux de For\u00eat',
@@ -169,6 +168,54 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- GradCAM implementation (no opencv dependency) ---
+def compute_gradcam(model, input_tensor, target_layer):
+    """Compute GradCAM heatmap using hooks."""
+    activations = []
+    gradients = []
+
+    def forward_hook(module, input, output):
+        activations.append(output.detach())
+
+    def backward_hook(module, grad_input, grad_output):
+        gradients.append(grad_output[0].detach())
+
+    handle_f = target_layer.register_forward_hook(forward_hook)
+    handle_b = target_layer.register_full_backward_hook(backward_hook)
+
+    output = model(input_tensor)
+    pred_idx = output.argmax(dim=-1).item()
+    model.zero_grad()
+    output[0, pred_idx].backward()
+
+    handle_f.remove()
+    handle_b.remove()
+
+    act = activations[0][0]  # (C, H, W)
+    grad = gradients[0][0]   # (C, H, W)
+
+    weights = grad.mean(dim=(1, 2))  # (C,)
+    cam_map = (weights[:, None, None] * act).sum(dim=0)  # (H, W)
+    cam_map = torch.relu(cam_map)
+    cam_map = cam_map - cam_map.min()
+    if cam_map.max() > 0:
+        cam_map = cam_map / cam_map.max()
+
+    # Resize to input size (224x224)
+    cam_map = cam_map.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+    cam_map = torch.nn.functional.interpolate(cam_map, size=(224, 224), mode='bilinear', align_corners=False)
+    return cam_map[0, 0].numpy()
+
+
+def overlay_cam_on_image(img_array, cam_map, alpha=0.5):
+    """Overlay GradCAM heatmap on image. Returns PIL Image."""
+    colormap = cm.get_cmap('jet')
+    heatmap = colormap(cam_map)[:, :, :3]  # (H, W, 3) float
+    overlay = (1 - alpha) * img_array + alpha * heatmap
+    overlay = np.clip(overlay, 0, 1)
+    return Image.fromarray((overlay * 255).astype(np.uint8))
+
+
 # --- Load model ---
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_weights')
 
@@ -194,7 +241,8 @@ std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
 
 class_names = ['fire', 'no_fire']
 
-class GradCAMWrapper(torch.nn.Module):
+# GradCAM wrapper that returns logits directly
+class GradCAMModel(torch.nn.Module):
     def __init__(self, model):
         super().__init__()
         self.model = model
@@ -203,17 +251,16 @@ class GradCAMWrapper(torch.nn.Module):
     def forward(self, x):
         return self.model(x).logits
 
-wrapped_model = GradCAMWrapper(model)
-wrapped_model.eval()
-
-target_layer = wrapped_model.efficientnet.encoder.blocks[-1]
-cam = GradCAM(model=wrapped_model, target_layers=[target_layer])
+gradcam_model = GradCAMModel(model)
+gradcam_model.eval()
+target_layer = gradcam_model.efficientnet.encoder.blocks[-1]
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.markdown("""
     <div style="text-align:center; padding: 1rem 0;">
-        <img src="https://www.sdis44.fr/wp-content/uploads/logo-sdis44-white.svg" width="180" alt="SDIS 44">
+        <p style="font-size: 2.5rem; margin: 0;">\U0001f6a8</p>
+        <h2 style="margin: 0.3rem 0;">SDIS 44</h2>
     </div>
     """, unsafe_allow_html=True)
 
@@ -259,7 +306,7 @@ with st.sidebar:
 st.markdown("""
 <div class="sdis-header">
     <div>
-        <img src="https://www.sdis44.fr/wp-content/uploads/logo-sdis44-white.svg" alt="SDIS 44">
+        <p style="font-size: 3.5rem; margin: 0;">\U0001f6a8</p>
     </div>
     <div class="sdis-header-text">
         <h1>\U0001f6a8 VIGIE IA - D\u00e9tection Feux de For\u00eat</h1>
@@ -281,7 +328,7 @@ if uploaded_file is not None:
 
     with st.spinner('\U0001f50d Analyse en cours par le mod\u00e8le IA...'):
         img_tensor = val_transform(image)
-        input_tensor = img_tensor.unsqueeze(0)
+        input_tensor = img_tensor.unsqueeze(0).requires_grad_(True)
 
         with torch.no_grad():
             outputs = model(input_tensor)
@@ -294,9 +341,10 @@ if uploaded_file is not None:
         no_fire_prob = probabilities[1].item()
 
         # GradCAM
-        grayscale_cam = cam(input_tensor=input_tensor)[0]
+        input_cam = img_tensor.unsqueeze(0).requires_grad_(True)
+        grayscale_cam = compute_gradcam(gradcam_model, input_cam, target_layer)
         img_display = (img_tensor * std + mean).permute(1, 2, 0).numpy().clip(0, 1)
-        overlay = show_cam_on_image(img_display, grayscale_cam, use_rgb=True)
+        overlay = overlay_cam_on_image(img_display, grayscale_cam)
 
     # --- Results ---
     if pred_class == 'fire':
@@ -415,139 +463,3 @@ st.markdown("""
     Vigie IA - Prototype de d\u00e9tection de feux de for\u00eat \u2022 Pour toute urgence : <strong>18</strong> ou <strong>112</strong>
 </div>
 """, unsafe_allow_html=True)
-# -*- coding: utf-8 -*-
-import streamlit as st
-import torch
-import numpy as np
-from PIL import Image
-from torchvision import transforms
-from transformers import AutoModelForImageClassification
-from pytorch_grad_cam import GradCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image
-
-st.set_page_config(
-    page_title='Détecteur de feux de forêt',
-    page_icon='🔥',
-    layout='wide'
-)
-
-import os
-
-MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_weights')
-
-@st.cache_resource
-def load_model():
-    model = AutoModelForImageClassification.from_pretrained(
-        MODEL_DIR,
-        num_labels=2,
-        ignore_mismatched_sizes=True
-    )
-    model.eval()
-    return model
-
-model = load_model()
-
-val_transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-])
-mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-
-class_names = ['fire', 'no_fire']
-
-class GradCAMWrapper(torch.nn.Module):
-    def __init__(self, model):
-        super().__init__()
-        self.model = model
-        self.efficientnet = model.efficientnet
-
-    def forward(self, x):
-        return self.model(x).logits
-
-wrapped_model = GradCAMWrapper(model)
-wrapped_model.eval()
-
-target_layer = wrapped_model.efficientnet.encoder.blocks[-1]
-cam = GradCAM(model=wrapped_model, target_layers=[target_layer])
-
-st.sidebar.title('À propos')
-st.sidebar.info(
-    'Système d\'aide à la détection de feux de forêt. '
-    'Toute alerte doit être confirmée par un opérateur humain avant mobilisation.'
-)
-st.sidebar.markdown('---')
-st.sidebar.markdown('**Modèle :** EfficientNet-B0 (fine-tuné)')
-st.sidebar.markdown('**Classes :** no_fire, fire')
-st.sidebar.markdown('**Entrée :** Image 224x224 RGB')
-
-with st.sidebar.expander('Comment ça marche ?'):
-    st.write(
-        '1. Uploadez une image de caméra de surveillance\n'
-        '2. Le modèle EfficientNet-B0 analyse l\'image\n'
-        '3. Il prédit s\'il y a un feu ou non avec un score de confiance\n'
-        '4. Le GradCAM montre les zones qui ont influencé la décision'
-    )
-
-st.title('🔥 Détecteur de feux de forêt')
-st.markdown(
-    'Uploadez une image pour obtenir une prédiction '
-    'avec score de confiance et visualisation GradCAM.'
-)
-
-uploaded_file = st.file_uploader(
-    'Choisir une image',
-    type=['jpg', 'jpeg', 'png'],
-    help='Formats acceptés : JPG, JPEG, PNG'
-)
-
-if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert('RGB')
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader('Image originale')
-        st.image(image, use_container_width=True)
-
-    with col2:
-        st.subheader('Analyse')
-
-        with st.spinner('Analyse en cours...'):
-            img_tensor = val_transform(image)
-            input_tensor = img_tensor.unsqueeze(0)
-
-            with torch.no_grad():
-                outputs = model(input_tensor)
-                probabilities = torch.softmax(outputs.logits, dim=-1)[0]
-
-            pred_idx = probabilities.argmax().item()
-            pred_class = class_names[pred_idx]
-            confidence = probabilities[pred_idx].item()
-
-            if pred_class == 'fire':
-                st.error(f'🔥 **ALERTE FEU D\u00c9TECT\u00c9** - Confiance : {confidence:.1%}')
-            else:
-                st.success(f'\u2705 **Pas de feu d\u00e9tect\u00e9** - Confiance : {confidence:.1%}')
-
-            st.progress(confidence)
-            st.write(f'P(fire) = {probabilities[0]:.4f} | P(no_fire) = {probabilities[1]:.4f}')
-
-            grayscale_cam = cam(input_tensor=input_tensor)[0]
-            img_display = (img_tensor * std + mean).permute(1, 2, 0).numpy().clip(0, 1)
-            overlay = show_cam_on_image(img_display, grayscale_cam, use_rgb=True)
-
-            st.subheader('GradCAM - Zones d\'attention')
-            st.image(overlay, caption='Les zones rouges sont celles qui influencent le plus la décision',
-                     use_container_width=True)
-
-    st.markdown('---')
-    st.error(
-        '\u26a0\ufe0f **DISCLAIMER** : Système d\'aide à la détection uniquement. '
-        'Toute alerte doit être confirmée par un opérateur humain qualifié '
-        'avant toute mobilisation de moyens. Ce modèle peut produire des '
-        'faux positifs et des faux négatifs.'
-    )
-else:
-    st.info('👆 Uploadez une image pour commencer l\'analyse.')
