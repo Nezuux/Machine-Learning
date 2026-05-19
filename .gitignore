@@ -3,6 +3,7 @@
 
 # Sauf les fichiers de l'app
 !.gitignore
+!.python-version
 !app.py
 !requirements.txt
 !README.md
