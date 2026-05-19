@@ -3,6 +3,8 @@ import streamlit as st
 import torch
 import numpy as np
 import os
+import time
+import io
 from PIL import Image
 from torchvision import transforms
 from transformers import AutoModelForImageClassification
@@ -15,6 +17,10 @@ st.set_page_config(
     layout='wide',
     initial_sidebar_state='expanded'
 )
+
+# --- Session state for history ---
+if 'history' not in st.session_state:
+    st.session_state.history = []
 
 # --- PREMIUM CSS ---
 st.markdown("""
@@ -40,7 +46,6 @@ st.markdown("""
         color: var(--text-primary);
     }
 
-    /* Hide default Streamlit elements */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -59,7 +64,7 @@ st.markdown("""
         color: var(--text-secondary) !important;
     }
 
-    /* Main header */
+    /* Hero banner */
     .hero-banner {
         background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 50%, #7f1d1d 100%);
         border: 1px solid var(--border-glass);
@@ -233,7 +238,57 @@ st.markdown("""
         font-size: 0.9rem;
     }
 
-    /* Gauge / metric */
+    /* Circular gauge */
+    .gauge-container {
+        position: relative;
+        width: 130px;
+        height: 130px;
+        margin: 0 auto;
+    }
+
+    .gauge-svg {
+        transform: rotate(-90deg);
+        width: 130px;
+        height: 130px;
+    }
+
+    .gauge-bg {
+        fill: none;
+        stroke: rgba(255,255,255,0.06);
+        stroke-width: 8;
+    }
+
+    .gauge-fill {
+        fill: none;
+        stroke-width: 8;
+        stroke-linecap: round;
+        transition: stroke-dashoffset 1.5s ease;
+    }
+
+    .gauge-text {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+    }
+
+    .gauge-value {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .gauge-label {
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--text-secondary);
+        margin-top: 2px;
+    }
+
+    /* Metric cards */
     .metric-gauge {
         background: var(--bg-card);
         border: 1px solid var(--border-glass);
@@ -281,7 +336,7 @@ st.markdown("""
         background-clip: text;
     }
 
-    /* Progress bar custom */
+    /* Confidence bar */
     .confidence-bar {
         height: 6px;
         border-radius: 3px;
@@ -302,6 +357,48 @@ st.markdown("""
 
     .confidence-bar-fill.safe {
         background: linear-gradient(90deg, #34d399, #10b981);
+    }
+
+    /* Risk level badge */
+    .risk-badge {
+        display: inline-block;
+        padding: 0.4rem 1rem;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        margin-top: 0.8rem;
+    }
+
+    .risk-critical {
+        background: rgba(239, 68, 68, 0.2);
+        border: 1px solid rgba(239, 68, 68, 0.5);
+        color: #fca5a5;
+        animation: riskPulse 1s ease-in-out infinite;
+    }
+
+    .risk-high {
+        background: rgba(245, 158, 11, 0.2);
+        border: 1px solid rgba(245, 158, 11, 0.5);
+        color: #fcd34d;
+    }
+
+    .risk-moderate {
+        background: rgba(59, 130, 246, 0.2);
+        border: 1px solid rgba(59, 130, 246, 0.5);
+        color: #93c5fd;
+    }
+
+    .risk-low {
+        background: rgba(16, 185, 129, 0.2);
+        border: 1px solid rgba(16, 185, 129, 0.5);
+        color: #6ee7b7;
+    }
+
+    @keyframes riskPulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
     }
 
     /* Image container */
@@ -326,7 +423,7 @@ st.markdown("""
         border-radius: 8px;
     }
 
-    /* Welcome cards */
+    /* Feature cards */
     .feature-card {
         background: var(--bg-card);
         border: 1px solid var(--border-glass);
@@ -368,7 +465,7 @@ st.markdown("""
         line-height: 1.5;
     }
 
-    /* Upload dropzone */
+    /* Dropzone */
     .dropzone {
         background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(99, 102, 241, 0.05));
         border: 2px dashed rgba(99, 102, 241, 0.3);
@@ -419,34 +516,90 @@ st.markdown("""
         font-size: 0.75rem;
     }
 
-    .footer-premium a {
-        color: var(--accent-blue);
-        text-decoration: none;
+    /* History log */
+    .history-item {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+        padding: 0.6rem 0.8rem;
+        border-radius: 8px;
+        background: rgba(255,255,255,0.02);
+        border: 1px solid rgba(255,255,255,0.04);
+        margin-bottom: 0.5rem;
+        font-size: 0.78rem;
     }
 
-    /* Scanning animation */
-    .scan-line {
-        position: relative;
+    .history-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .history-dot.fire { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.5); }
+    .history-dot.safe { background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,0.5); }
+
+    .history-time {
+        font-family: 'JetBrains Mono', monospace;
+        color: rgba(255,255,255,0.4);
+        font-size: 0.7rem;
+    }
+
+    .history-result {
+        color: rgba(255,255,255,0.8);
+        flex: 1;
+    }
+
+    .history-conf {
+        font-family: 'JetBrains Mono', monospace;
+        font-weight: 600;
+        font-size: 0.75rem;
+    }
+
+    /* Analysis time */
+    .analysis-time {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.2);
+        border-radius: 8px;
+        padding: 0.3rem 0.7rem;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.75rem;
+        color: #93c5fd;
+    }
+
+    /* Fire particles */
+    .fire-particles {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 0;
         overflow: hidden;
     }
 
-    .scan-line::after {
-        content: '';
+    .particle {
         position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, var(--accent-blue), transparent);
-        animation: scan 2s linear infinite;
+        bottom: -10px;
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        animation: rise linear infinite;
+        opacity: 0;
     }
 
-    @keyframes scan {
-        from { left: -100%; }
-        to { left: 100%; }
+    @keyframes rise {
+        0% { transform: translateY(0) scale(1); opacity: 0; }
+        10% { opacity: 0.8; }
+        90% { opacity: 0.3; }
+        100% { transform: translateY(-100vh) scale(0.3); opacity: 0; }
     }
 
-    /* Sidebar styling */
+    /* Sidebar section */
     .sidebar-section {
         background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.06);
@@ -471,19 +624,9 @@ st.markdown("""
         font-size: 0.82rem;
     }
 
-    .stat-row:last-child {
-        border-bottom: none;
-    }
-
-    .stat-label {
-        color: rgba(255,255,255,0.5);
-    }
-
-    .stat-value {
-        font-family: 'JetBrains Mono', monospace;
-        font-weight: 600;
-        color: rgba(255,255,255,0.9);
-    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-label { color: rgba(255,255,255,0.5); }
+    .stat-value { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: rgba(255,255,255,0.9); }
 
     /* Timestamp */
     .timestamp {
@@ -495,12 +638,27 @@ st.markdown("""
         border-radius: 6px;
         border: 1px solid var(--border-glass);
     }
+
+    /* Interpretation text */
+    .interpretation {
+        background: rgba(255,255,255,0.03);
+        border: 1px solid var(--border-glass);
+        border-radius: 10px;
+        padding: 1rem 1.2rem;
+        margin-top: 1rem;
+        font-size: 0.82rem;
+        line-height: 1.6;
+        color: var(--text-secondary);
+    }
+
+    .interpretation strong {
+        color: var(--text-primary);
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- GradCAM implementation (no opencv dependency) ---
+# --- GradCAM implementation ---
 def compute_gradcam(model, input_tensor, target_layer):
-    """Compute GradCAM heatmap using hooks."""
     activations = []
     gradients = []
 
@@ -537,12 +695,77 @@ def compute_gradcam(model, input_tensor, target_layer):
 
 
 def overlay_cam_on_image(img_array, cam_map, alpha=0.5):
-    """Overlay GradCAM heatmap on image. Returns PIL Image."""
     colormap = cm.get_cmap('inferno')
     heatmap = colormap(cam_map)[:, :, :3]
     overlay = (1 - alpha) * img_array + alpha * heatmap
     overlay = np.clip(overlay, 0, 1)
     return Image.fromarray((overlay * 255).astype(np.uint8))
+
+
+def get_risk_level(pred_class, confidence):
+    """Return risk level, class, and interpretation."""
+    if pred_class == 'fire':
+        if confidence >= 0.9:
+            return 'CRITIQUE', 'risk-critical', 'Forte probabilit\u00e9 de d\u00e9part de feu. V\u00e9rification imm\u00e9diate requise. Le mod\u00e8le est tr\u00e8s confiant dans sa d\u00e9tection.'
+        elif confidence >= 0.7:
+            return '\u00c9LEV\u00c9', 'risk-high', 'Suspicion de feu avec confiance mod\u00e9r\u00e9e. Confirmation visuelle recommand\u00e9e avant d\u00e9clenchement du protocole.'
+        else:
+            return 'MOD\u00c9R\u00c9', 'risk-moderate', 'Signal faible d\u00e9tect\u00e9. Possibilit\u00e9 de faux positif (fum\u00e9e, reflets, coucher de soleil). V\u00e9rification conseill\u00e9e.'
+    else:
+        if confidence >= 0.9:
+            return 'FAIBLE', 'risk-low', 'Zone s\u00e9curis\u00e9e. Le mod\u00e8le n\'identifie aucun signe de d\u00e9part de feu avec une tr\u00e8s haute confiance.'
+        else:
+            return 'MOD\u00c9R\u00c9', 'risk-moderate', 'Pas de feu d\u00e9tect\u00e9 mais confiance limit\u00e9e. Conditions m\u00e9t\u00e9o ou qualit\u00e9 d\'image possiblement d\u00e9grad\u00e9es.'
+
+
+def svg_gauge(value, color_start, color_end, label):
+    """Generate SVG circular gauge."""
+    circumference = 2 * 3.14159 * 52
+    offset = circumference * (1 - value)
+    return f"""
+    <div class="gauge-container">
+        <svg class="gauge-svg" viewBox="0 0 120 120">
+            <circle class="gauge-bg" cx="60" cy="60" r="52"/>
+            <circle class="gauge-fill" cx="60" cy="60" r="52"
+                stroke="url(#grad-{label})"
+                stroke-dasharray="{circumference}"
+                stroke-dashoffset="{offset}"/>
+            <defs>
+                <linearGradient id="grad-{label}" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" style="stop-color:{color_start}"/>
+                    <stop offset="100%" style="stop-color:{color_end}"/>
+                </linearGradient>
+            </defs>
+        </svg>
+        <div class="gauge-text">
+            <div class="gauge-value">{value:.0%}</div>
+            <div class="gauge-label">{label}</div>
+        </div>
+    </div>
+    """
+
+
+def generate_particles_html():
+    """Generate fire particles CSS animation."""
+    particles = ""
+    import random
+    for i in range(20):
+        left = random.randint(0, 100)
+        delay = random.uniform(0, 5)
+        duration = random.uniform(4, 8)
+        size = random.uniform(2, 5)
+        color = random.choice(['#ef4444', '#f97316', '#fbbf24', '#f87171'])
+        particles += f"""
+        <div class="particle" style="
+            left: {left}%;
+            animation-delay: {delay:.1f}s;
+            animation-duration: {duration:.1f}s;
+            width: {size:.0f}px;
+            height: {size:.0f}px;
+            background: {color};
+            box-shadow: 0 0 {size*2:.0f}px {color};
+        "></div>"""
+    return f'<div class="fire-particles">{particles}</div>'
 
 
 # --- Load model ---
@@ -628,6 +851,26 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+    # --- Session History ---
+    if st.session_state.history:
+        st.markdown("""
+        <div class="sidebar-section">
+            <h4>Historique de session</h4>
+        """, unsafe_allow_html=True)
+        for entry in reversed(st.session_state.history[-8:]):
+            dot_class = "fire" if entry['class'] == 'fire' else "safe"
+            result_text = "\U0001f525 Feu" if entry['class'] == 'fire' else "\u2705 Normal"
+            conf_color = "#f87171" if entry['class'] == 'fire' else "#6ee7b7"
+            st.markdown(f"""
+            <div class="history-item">
+                <div class="history-dot {dot_class}"></div>
+                <span class="history-time">{entry['time']}</span>
+                <span class="history-result">{result_text}</span>
+                <span class="history-conf" style="color:{conf_color};">{entry['confidence']:.0%}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown("""
     <div style="text-align:center; font-size:0.7rem; opacity:0.4; margin-top:2rem; padding-top:1rem; border-top: 1px solid rgba(255,255,255,0.06);">
         SDIS de Loire-Atlantique<br>
@@ -650,9 +893,9 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Upload section
+# Upload
 uploaded_file = st.file_uploader(
-    "T\u00e9l\u00e9verser une image de cam\u00e9ra de surveillance",
+    "T\u00e9l\u00e9verser une image",
     type=['jpg', 'jpeg', 'png'],
     help="Formats accept\u00e9s : JPG, JPEG, PNG",
     label_visibility="collapsed"
@@ -661,25 +904,44 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     image = Image.open(uploaded_file).convert('RGB')
 
-    with st.spinner(''):
-        img_tensor = val_transform(image)
-        input_tensor = img_tensor.unsqueeze(0).requires_grad_(True)
+    # Measure analysis time
+    start_time = time.time()
 
-        with torch.no_grad():
-            outputs = model(input_tensor)
-            probabilities = torch.softmax(outputs.logits, dim=-1)[0]
+    img_tensor = val_transform(image)
+    input_tensor = img_tensor.unsqueeze(0).requires_grad_(True)
 
-        pred_idx = probabilities.argmax().item()
-        pred_class = class_names[pred_idx]
-        confidence = probabilities[pred_idx].item()
-        fire_prob = probabilities[0].item()
-        no_fire_prob = probabilities[1].item()
+    with torch.no_grad():
+        outputs = model(input_tensor)
+        probabilities = torch.softmax(outputs.logits, dim=-1)[0]
 
-        # GradCAM
-        input_cam = img_tensor.unsqueeze(0).requires_grad_(True)
-        grayscale_cam = compute_gradcam(gradcam_model, input_cam, target_layer)
-        img_display = (img_tensor * std + mean).permute(1, 2, 0).numpy().clip(0, 1)
-        overlay = overlay_cam_on_image(img_display, grayscale_cam)
+    pred_idx = probabilities.argmax().item()
+    pred_class = class_names[pred_idx]
+    confidence = probabilities[pred_idx].item()
+    fire_prob = probabilities[0].item()
+    no_fire_prob = probabilities[1].item()
+
+    # GradCAM
+    input_cam = img_tensor.unsqueeze(0).requires_grad_(True)
+    grayscale_cam = compute_gradcam(gradcam_model, input_cam, target_layer)
+    img_display = (img_tensor * std + mean).permute(1, 2, 0).numpy().clip(0, 1)
+    overlay = overlay_cam_on_image(img_display, grayscale_cam)
+
+    analysis_time = time.time() - start_time
+
+    # Add to history
+    st.session_state.history.append({
+        'time': datetime.now().strftime('%H:%M:%S'),
+        'class': pred_class,
+        'confidence': confidence,
+        'filename': uploaded_file.name
+    })
+
+    # Risk level
+    risk_label, risk_class, interpretation = get_risk_level(pred_class, confidence)
+
+    # Fire particles if fire detected
+    if pred_class == 'fire':
+        st.markdown(generate_particles_html(), unsafe_allow_html=True)
 
     # --- Alert ---
     if pred_class == 'fire':
@@ -687,6 +949,7 @@ if uploaded_file is not None:
         <div class="alert-fire-premium">
             <h2>\U0001f6a8 ALERTE \u2014 D\u00c9PART DE FEU D\u00c9TECT\u00c9</h2>
             <p>Confiance : <strong>{confidence:.1%}</strong> \u2022 {datetime.now().strftime('%d/%m/%Y \u00e0 %H:%M:%S')}</p>
+            <div class="risk-badge {risk_class}">Niveau de risque : {risk_label}</div>
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -694,43 +957,39 @@ if uploaded_file is not None:
         <div class="alert-safe-premium">
             <h2>\u2705 AUCUNE MENACE D\u00c9TECT\u00c9E</h2>
             <p>Confiance : <strong>{confidence:.1%}</strong> \u2022 {datetime.now().strftime('%d/%m/%Y \u00e0 %H:%M:%S')}</p>
+            <div class="risk-badge {risk_class}">Niveau de risque : {risk_label}</div>
         </div>
         """, unsafe_allow_html=True)
+
+    # Analysis time badge
+    st.markdown(f"""
+    <div style="margin: 1rem 0; display:flex; align-items:center; gap:1rem;">
+        <span class="analysis-time">\u23f1 Analyse : {analysis_time:.2f}s</span>
+        <span class="analysis-time">\U0001f4c4 {uploaded_file.name}</span>
+        <span class="analysis-time">\U0001f4d0 {image.size[0]}\u00d7{image.size[1]}px</span>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- Metrics ---
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    bar_class = "fire" if pred_class == 'fire' else "safe"
-    with col_m1:
+    # --- Circular Gauges ---
+    col_g1, col_g2, col_g3 = st.columns(3)
+    with col_g1:
         st.markdown(f"""
         <div class="metric-gauge">
-            <div class="label">\U0001f525 Probabilit\u00e9 Feu</div>
-            <div class="value fire">{fire_prob:.1%}</div>
-            <div class="confidence-bar"><div class="confidence-bar-fill fire" style="width:{fire_prob*100:.0f}%"></div></div>
+            {svg_gauge(fire_prob, '#f87171', '#ef4444', 'FEU')}
         </div>
         """, unsafe_allow_html=True)
-    with col_m2:
+    with col_g2:
         st.markdown(f"""
         <div class="metric-gauge">
-            <div class="label">\U0001f333 Probabilit\u00e9 Normal</div>
-            <div class="value safe">{no_fire_prob:.1%}</div>
-            <div class="confidence-bar"><div class="confidence-bar-fill safe" style="width:{no_fire_prob*100:.0f}%"></div></div>
+            {svg_gauge(no_fire_prob, '#34d399', '#10b981', 'NORMAL')}
         </div>
         """, unsafe_allow_html=True)
-    with col_m3:
+    with col_g3:
         st.markdown(f"""
         <div class="metric-gauge">
-            <div class="label">\U0001f3af Confiance</div>
-            <div class="value {bar_class}">{confidence:.1%}</div>
-            <div class="confidence-bar"><div class="confidence-bar-fill {bar_class}" style="width:{confidence*100:.0f}%"></div></div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_m4:
-        st.markdown(f"""
-        <div class="metric-gauge">
-            <div class="label">\u23f1 Horodatage</div>
-            <div class="timestamp" style="margin-top:0.6rem; display:inline-block;">{datetime.now().strftime('%H:%M:%S')}</div>
+            {svg_gauge(confidence, '#60a5fa', '#a78bfa', 'CONFIANCE')}
         </div>
         """, unsafe_allow_html=True)
 
@@ -752,11 +1011,50 @@ if uploaded_file is not None:
         </div>
         """, unsafe_allow_html=True)
         st.image(overlay, use_container_width=True)
-        st.markdown("""
-        <p style="font-size:0.75rem; color: var(--text-secondary); margin-top:0.5rem; text-align:center;">
-            Les zones claires indiquent les r\u00e9gions ayant le plus influenc\u00e9 la d\u00e9cision du mod\u00e8le.
-        </p>
-        """, unsafe_allow_html=True)
+
+    # --- Interpretation ---
+    st.markdown(f"""
+    <div class="interpretation">
+        <strong>\U0001f4cb Interpr\u00e9tation :</strong> {interpretation}
+        <br><br>
+        <strong>\U0001f9e0 GradCAM :</strong> Les zones lumineuses sur la carte d'attention montrent les r\u00e9gions
+        de l'image ayant le plus influenc\u00e9 la d\u00e9cision. V\u00e9rifiez que ces zones correspondent bien
+        \u00e0 des \u00e9l\u00e9ments pertinents (flammes, fum\u00e9e) et non \u00e0 des artefacts.
+    </div>
+    """, unsafe_allow_html=True)
+
+    # --- Download report ---
+    report_text = f"""RAPPORT D'ANALYSE - VIGIE IA SDIS 44
+{'='*50}
+Date : {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+Fichier : {uploaded_file.name}
+Dimensions : {image.size[0]}x{image.size[1]} pixels
+Temps d'analyse : {analysis_time:.2f}s
+
+RESULTAT
+{'-'*50}
+Prediction : {'FEU DETECTE' if pred_class == 'fire' else 'PAS DE FEU'}
+Confiance : {confidence:.1%}
+Niveau de risque : {risk_label}
+P(feu) : {fire_prob:.4f}
+P(normal) : {no_fire_prob:.4f}
+
+INTERPRETATION
+{'-'*50}
+{interpretation}
+
+AVERTISSEMENT
+{'-'*50}
+Ce systeme est un outil d'aide a la decision uniquement.
+Toute alerte doit etre confirmee par un operateur qualifie.
+"""
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.download_button(
+        label="\U0001f4e5 T\u00e9l\u00e9charger le rapport d'analyse",
+        data=report_text,
+        file_name=f"rapport_vigie_ia_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+        mime="text/plain"
+    )
 
     # --- Disclaimer ---
     st.markdown("""
@@ -789,13 +1087,13 @@ else:
     st.markdown("<br><br>", unsafe_allow_html=True)
 
     # Feature cards
-    col_f1, col_f2, col_f3 = st.columns(3)
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     with col_f1:
         st.markdown("""
         <div class="feature-card">
             <div class="feature-icon" style="background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(59,130,246,0.2));">\U0001f9e0</div>
             <h4>Deep Learning</h4>
-            <p>EfficientNet-B0 fine-tun\u00e9 sur 1000+ images a\u00e9riennes et satellite pour la d\u00e9tection de feux</p>
+            <p>EfficientNet-B0 fine-tun\u00e9 sur 1000+ images</p>
         </div>
         """, unsafe_allow_html=True)
     with col_f2:
@@ -803,7 +1101,7 @@ else:
         <div class="feature-card">
             <div class="feature-icon" style="background: linear-gradient(135deg, rgba(239,68,68,0.2), rgba(245,158,11,0.2));">\u26a1</div>
             <h4>Temps r\u00e9el</h4>
-            <p>Analyse instantan\u00e9e des images avec pr\u00e9diction et score de confiance en quelques secondes</p>
+            <p>Analyse instantan\u00e9e en quelques secondes</p>
         </div>
         """, unsafe_allow_html=True)
     with col_f3:
@@ -811,7 +1109,15 @@ else:
         <div class="feature-card">
             <div class="feature-icon" style="background: linear-gradient(135deg, rgba(16,185,129,0.2), rgba(52,211,153,0.2));">\U0001f50d</div>
             <h4>Explicabilit\u00e9</h4>
-            <p>Visualisation GradCAM des zones d'attention pour comprendre et valider la d\u00e9cision de l'IA</p>
+            <p>GradCAM pour comprendre les d\u00e9cisions IA</p>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_f4:
+        st.markdown("""
+        <div class="feature-card">
+            <div class="feature-icon" style="background: linear-gradient(135deg, rgba(168,85,247,0.2), rgba(139,92,246,0.2));">\U0001f4ca</div>
+            <h4>AUC 0.984</h4>
+            <p>Performance valid\u00e9e sur jeu de test ind\u00e9pendant</p>
         </div>
         """, unsafe_allow_html=True)
 
