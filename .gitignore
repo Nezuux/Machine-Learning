@@ -1,0 +1,11 @@
+# Tout ignorer par defaut
+*
+
+# Sauf les fichiers de l'app
+!.gitignore
+!app.py
+!requirements.txt
+!README.md
+!model_weights/
+!model_weights/**
+!Track_C_Detecteur_Feux_de_Foret_Allaire_Loret.ipynb
