@@ -58,17 +58,37 @@ st.markdown("""
         color: var(--text-primary);
     }
 
-    /* Grid background */
+    /* Animated mesh gradient background */
     .stApp::before {
         content: '';
         position: fixed;
         inset: 0;
-        background-image:
-            linear-gradient(rgba(99, 102, 241, 0.03) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(99, 102, 241, 0.03) 1px, transparent 1px);
-        background-size: 50px 50px;
+        background:
+            radial-gradient(ellipse 80% 50% at 20% 40%, rgba(239, 68, 68, 0.06) 0%, transparent 50%),
+            radial-gradient(ellipse 60% 80% at 80% 20%, rgba(99, 102, 241, 0.07) 0%, transparent 50%),
+            radial-gradient(ellipse 50% 60% at 60% 80%, rgba(6, 182, 212, 0.05) 0%, transparent 50%),
+            radial-gradient(ellipse 40% 40% at 10% 90%, rgba(168, 85, 247, 0.04) 0%, transparent 50%);
+        animation: meshMove 20s ease-in-out infinite alternate;
         pointer-events: none;
         z-index: 0;
+    }
+
+    .stApp::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background-image:
+            radial-gradient(circle at 25% 25%, rgba(255,255,255,0.015) 1px, transparent 1px),
+            radial-gradient(circle at 75% 75%, rgba(255,255,255,0.01) 1px, transparent 1px);
+        background-size: 60px 60px, 90px 90px;
+        pointer-events: none;
+        z-index: 0;
+    }
+
+    @keyframes meshMove {
+        0% { transform: scale(1) rotate(0deg); opacity: 0.8; }
+        50% { transform: scale(1.05) rotate(1deg); opacity: 1; }
+        100% { transform: scale(1) rotate(-1deg); opacity: 0.9; }
     }
 
     #MainMenu {visibility: hidden;}
