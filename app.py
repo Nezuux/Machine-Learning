@@ -996,6 +996,7 @@ if uploaded_file is not None:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # --- Images ---
+    image_resized = image.resize((224, 224))
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("""
@@ -1003,7 +1004,7 @@ if uploaded_file is not None:
             <h4>\U0001f4f7 Image source</h4>
         </div>
         """, unsafe_allow_html=True)
-        st.image(image, use_container_width=True)
+        st.image(image_resized, use_container_width=True)
     with col2:
         st.markdown("""
         <div class="image-container">
