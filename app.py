@@ -883,7 +883,7 @@ st.markdown("""
 
 
 # ========== TABS ==========
-tab_analyse, tab_multi, tab_dashboard = st.tabs(["\U0001f50d  Analyse", "\U0001f4ca  Multi-analyse", "\U0001f4cb  Dashboard"])
+tab_analyse, tab_multi = st.tabs(["\U0001f50d  Analyse", "\U0001f4ca  Multi-analyse"])
 
 # ========== TAB 1: ANALYSE ==========
 with tab_analyse:
@@ -1168,82 +1168,6 @@ with tab_multi:
                         </div>
                         """, unsafe_allow_html=True)
                         st.image(r['image'], use_container_width=True)
-
-
-# ========== TAB 3: DASHBOARD ==========
-with tab_dashboard:
-    total = len(st.session_state.history)
-
-    if total == 0:
-        st.markdown("""
-        <div class="welcome-zone" style="padding:3rem;">
-            <div class="welcome-icon">\U0001f4ca</div>
-            <div class="welcome-title">Aucune donn\u00e9e</div>
-            <p class="welcome-desc">Lancez des analyses dans l'onglet "Analyse" pour voir les statistiques ici.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        fires = st.session_state.total_fires
-        safe = st.session_state.total_safe
-        avg_conf = np.mean([h['confidence'] for h in st.session_state.history])
-        fire_rate = fires / total if total > 0 else 0
-
-        # Stats cards
-        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-        with col_s1:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">Total analyses</div>
-                <div class="metric-value blue">{total}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with col_s2:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">Alertes feu</div>
-                <div class="metric-value red">{fires}</div>
-                <div class="metric-bar"><div class="metric-bar-fill red" style="width:{fire_rate*100:.0f}%"></div></div>
-            </div>
-            """, unsafe_allow_html=True)
-        with col_s3:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">Zones s\u00fbres</div>
-                <div class="metric-value green">{safe}</div>
-                <div class="metric-bar"><div class="metric-bar-fill green" style="width:{((1-fire_rate)*100):.0f}%"></div></div>
-            </div>
-            """, unsafe_allow_html=True)
-        with col_s4:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">Confiance moy.</div>
-                <div class="metric-value purple">{avg_conf:.0%}</div>
-                <div class="metric-bar"><div class="metric-bar-fill purple" style="width:{avg_conf*100:.0f}%"></div></div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # Full history table
-        st.markdown("""
-        <div class="interp-box">
-            <h5>Journal complet des analyses</h5>
-        </div>
-        """, unsafe_allow_html=True)
-
-        for entry in reversed(st.session_state.history):
-            icon = "\U0001f525" if entry['class'] == 'fire' else "\u2705"
-            border = "rgba(239,68,68,0.3)" if entry['class'] == 'fire' else "rgba(16,185,129,0.2)"
-            color = "#f87171" if entry['class'] == 'fire' else "#34d399"
-            st.markdown(f"""
-            <div style="display:flex; align-items:center; gap:1rem; padding:0.7rem 1rem; margin:0.4rem 0;
-                 background:var(--bg-card); border:1px solid {border}; border-radius:10px;">
-                <span style="font-size:1.2rem;">{icon}</span>
-                <span style="font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--text-muted);">{entry['time']}</span>
-                <span style="flex:1; font-size:0.82rem; color:var(--text-secondary);">{entry.get('filename', 'image')}</span>
-                <span style="font-family:'JetBrains Mono',monospace; font-weight:700; color:{color};">{entry['confidence']:.1%}</span>
-            </div>
-            """, unsafe_allow_html=True)
 
 
 # ========== FOOTER ==========
