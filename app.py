@@ -5,54 +5,106 @@ import numpy as np
 import os
 import time
 import io
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from torchvision import transforms
 from transformers import AutoModelForImageClassification
 from datetime import datetime
 import matplotlib.cm as cm
 
 st.set_page_config(
-    page_title='SDIS 44 - Vigie IA Feux de For\u00eat',
+    page_title='SDIS 44 - Vigie IA',
     page_icon='\U0001f6a8',
     layout='wide',
     initial_sidebar_state='expanded'
 )
 
-# --- Session state for history ---
+# --- Session state ---
 if 'history' not in st.session_state:
     st.session_state.history = []
+if 'total_fires' not in st.session_state:
+    st.session_state.total_fires = 0
+if 'total_safe' not in st.session_state:
+    st.session_state.total_safe = 0
 
-# --- PREMIUM CSS ---
+# --- ULTIMATE CSS ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
     :root {
-        --bg-primary: #0a0e1a;
-        --bg-secondary: #111827;
-        --bg-card: rgba(17, 24, 39, 0.7);
-        --border-glass: rgba(255, 255, 255, 0.08);
+        --bg-primary: #050810;
+        --bg-secondary: #0c1122;
+        --bg-card: rgba(12, 17, 34, 0.85);
+        --border-glass: rgba(255, 255, 255, 0.06);
+        --border-hover: rgba(99, 102, 241, 0.4);
         --text-primary: #f1f5f9;
-        --text-secondary: #94a3b8;
+        --text-secondary: #64748b;
+        --text-muted: #475569;
+        --accent-indigo: #6366f1;
         --accent-blue: #3b82f6;
+        --accent-cyan: #06b6d4;
         --accent-red: #ef4444;
         --accent-green: #10b981;
         --accent-orange: #f59e0b;
+        --accent-purple: #a855f7;
+        --glow-red: rgba(239, 68, 68, 0.4);
+        --glow-green: rgba(16, 185, 129, 0.3);
+        --glow-blue: rgba(59, 130, 246, 0.3);
     }
 
     .stApp {
-        font-family: 'Inter', sans-serif;
+        font-family: 'Inter', -apple-system, sans-serif;
         background: var(--bg-primary) !important;
         color: var(--text-primary);
+    }
+
+    /* Grid background */
+    .stApp::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background-image:
+            linear-gradient(rgba(99, 102, 241, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(99, 102, 241, 0.03) 1px, transparent 1px);
+        background-size: 50px 50px;
+        pointer-events: none;
+        z-index: 0;
     }
 
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
 
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0;
+        background: var(--bg-card);
+        border: 1px solid var(--border-glass);
+        border-radius: 12px;
+        padding: 4px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px;
+        color: var(--text-secondary);
+        font-weight: 500;
+        font-size: 0.85rem;
+        padding: 0.6rem 1.2rem;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, var(--accent-indigo), var(--accent-blue)) !important;
+        color: white !important;
+        font-weight: 600;
+    }
+
+    .stTabs [data-baseweb="tab-panel"] {
+        padding-top: 1.5rem;
+    }
+
     /* Sidebar */
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0f172a 0%, #1e1b4b 100%) !important;
+        background: linear-gradient(180deg, #070b14 0%, #0f0a2e 100%) !important;
         border-right: 1px solid var(--border-glass);
     }
 
@@ -60,236 +112,342 @@ st.markdown("""
         color: var(--text-primary) !important;
     }
 
-    section[data-testid="stSidebar"] p {
-        color: var(--text-secondary) !important;
-    }
-
-    /* Hero banner */
-    .hero-banner {
-        background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 50%, #7f1d1d 100%);
+    /* Hero */
+    .hero {
+        background: linear-gradient(135deg, #0f0a2e 0%, var(--bg-primary) 40%, #1a0a0a 100%);
         border: 1px solid var(--border-glass);
-        border-radius: 16px;
-        padding: 2rem 2.5rem;
-        margin-bottom: 2rem;
+        border-radius: 20px;
+        padding: 2.5rem 3rem;
+        margin-bottom: 1.5rem;
         position: relative;
         overflow: hidden;
     }
 
-    .hero-banner::before {
+    .hero::before {
         content: '';
         position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: radial-gradient(circle, rgba(59, 130, 246, 0.05) 0%, transparent 50%);
-        animation: rotate 20s linear infinite;
+        top: -100px;
+        right: -100px;
+        width: 300px;
+        height: 300px;
+        background: radial-gradient(circle, rgba(239,68,68,0.08) 0%, transparent 70%);
+        animation: breathe 6s ease-in-out infinite;
     }
 
-    @keyframes rotate {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
+    .hero::after {
+        content: '';
+        position: absolute;
+        bottom: -100px;
+        left: -100px;
+        width: 300px;
+        height: 300px;
+        background: radial-gradient(circle, rgba(99,102,241,0.06) 0%, transparent 70%);
+        animation: breathe 8s ease-in-out infinite reverse;
     }
 
-    .hero-content {
+    @keyframes breathe {
+        0%, 100% { transform: scale(1); opacity: 0.5; }
+        50% { transform: scale(1.2); opacity: 1; }
+    }
+
+    .hero-inner {
         position: relative;
         z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .hero-left {
         display: flex;
         align-items: center;
         gap: 1.5rem;
     }
 
-    .hero-icon {
-        width: 70px;
-        height: 70px;
-        background: linear-gradient(135deg, var(--accent-red), #dc2626);
+    .hero-logo {
+        width: 64px;
+        height: 64px;
+        background: linear-gradient(135deg, #ef4444, #b91c1c);
         border-radius: 16px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 2rem;
-        box-shadow: 0 8px 32px rgba(239, 68, 68, 0.3);
-        animation: glow 3s ease-in-out infinite;
+        font-size: 1.8rem;
+        box-shadow: 0 0 30px rgba(239,68,68,0.3), 0 0 60px rgba(239,68,68,0.1);
+        animation: logoGlow 4s ease-in-out infinite;
     }
 
-    @keyframes glow {
-        0%, 100% { box-shadow: 0 8px 32px rgba(239, 68, 68, 0.3); }
-        50% { box-shadow: 0 8px 48px rgba(239, 68, 68, 0.5); }
+    @keyframes logoGlow {
+        0%, 100% { box-shadow: 0 0 30px rgba(239,68,68,0.3); }
+        50% { box-shadow: 0 0 50px rgba(239,68,68,0.5), 0 0 80px rgba(239,68,68,0.2); }
     }
 
-    .hero-text h1 {
-        margin: 0;
-        font-size: 1.6rem;
+    .hero-title {
+        font-size: 1.5rem;
         font-weight: 800;
-        color: white !important;
-        letter-spacing: -0.02em;
+        color: white;
+        letter-spacing: -0.03em;
+        margin: 0;
     }
 
-    .hero-text p {
-        margin: 0.3rem 0 0 0;
-        font-size: 0.9rem;
+    .hero-subtitle {
+        font-size: 0.85rem;
         color: var(--text-secondary);
+        margin: 0.2rem 0 0 0;
     }
 
-    .hero-badge {
-        position: absolute;
-        top: 1.5rem;
-        right: 2rem;
-        background: rgba(16, 185, 129, 0.15);
-        border: 1px solid rgba(16, 185, 129, 0.3);
-        color: #10b981;
-        padding: 0.35rem 0.8rem;
-        border-radius: 20px;
-        font-size: 0.7rem;
+    .hero-status {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: rgba(16,185,129,0.1);
+        border: 1px solid rgba(16,185,129,0.25);
+        padding: 0.5rem 1rem;
+        border-radius: 30px;
+        font-size: 0.75rem;
         font-weight: 600;
-        letter-spacing: 0.5px;
-        text-transform: uppercase;
-        animation: statusPulse 2s ease-in-out infinite;
+        color: #6ee7b7;
     }
 
-    @keyframes statusPulse {
+    .hero-status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #10b981;
+        animation: blink 2s ease-in-out infinite;
+    }
+
+    @keyframes blink {
         0%, 100% { opacity: 1; }
-        50% { opacity: 0.7; }
-    }
-
-    /* Glass cards */
-    .glass-card {
-        background: var(--bg-card);
-        backdrop-filter: blur(20px);
-        border: 1px solid var(--border-glass);
-        border-radius: 12px;
-        padding: 1.5rem;
-        transition: all 0.3s ease;
-    }
-
-    .glass-card:hover {
-        border-color: rgba(59, 130, 246, 0.3);
-        box-shadow: 0 8px 32px rgba(59, 130, 246, 0.1);
-        transform: translateY(-2px);
+        50% { opacity: 0.3; }
     }
 
     /* Alert panels */
-    .alert-fire-premium {
-        background: linear-gradient(135deg, rgba(127, 29, 29, 0.8), rgba(153, 27, 27, 0.6));
-        border: 1px solid rgba(239, 68, 68, 0.4);
+    .alert-panel {
         border-radius: 16px;
-        padding: 2rem;
+        padding: 2rem 2.5rem;
         text-align: center;
         position: relative;
         overflow: hidden;
-        animation: fireAlert 1.5s ease-in-out infinite;
+        margin-bottom: 1.5rem;
     }
 
-    .alert-fire-premium::before {
+    .alert-fire {
+        background: linear-gradient(135deg, rgba(127,29,29,0.7), rgba(153,27,27,0.5));
+        border: 1px solid rgba(239,68,68,0.4);
+        animation: alertPulse 2s ease-in-out infinite;
+    }
+
+    .alert-safe {
+        background: linear-gradient(135deg, rgba(6,78,59,0.5), rgba(4,120,87,0.3));
+        border: 1px solid rgba(16,185,129,0.3);
+    }
+
+    @keyframes alertPulse {
+        0%, 100% { box-shadow: 0 0 30px rgba(239,68,68,0.15); }
+        50% { box-shadow: 0 0 60px rgba(239,68,68,0.3); }
+    }
+
+    .alert-panel h2 {
+        margin: 0;
+        font-size: 1.4rem;
+        font-weight: 800;
+        letter-spacing: 0.03em;
+    }
+
+    .alert-fire h2 { color: #fca5a5 !important; }
+    .alert-safe h2 { color: #6ee7b7 !important; }
+
+    .alert-panel .alert-sub {
+        margin: 0.5rem 0 0 0;
+        font-size: 0.9rem;
+    }
+
+    .alert-fire .alert-sub { color: #fecaca; }
+    .alert-safe .alert-sub { color: #a7f3d0; }
+
+    .risk-badge {
+        display: inline-block;
+        padding: 0.35rem 0.9rem;
+        border-radius: 20px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        margin-top: 1rem;
+    }
+
+    .risk-critical { background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.5); color: #fca5a5; }
+    .risk-high { background: rgba(245,158,11,0.2); border: 1px solid rgba(245,158,11,0.4); color: #fcd34d; }
+    .risk-moderate { background: rgba(59,130,246,0.2); border: 1px solid rgba(59,130,246,0.4); color: #93c5fd; }
+    .risk-low { background: rgba(16,185,129,0.2); border: 1px solid rgba(16,185,129,0.4); color: #6ee7b7; }
+
+    /* Metric cards */
+    .metric-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-glass);
+        border-radius: 14px;
+        padding: 1.3rem;
+        text-align: center;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .metric-card::before {
         content: '';
         position: absolute;
-        inset: 0;
-        background: repeating-linear-gradient(
-            45deg,
-            transparent,
-            transparent 10px,
-            rgba(239, 68, 68, 0.03) 10px,
-            rgba(239, 68, 68, 0.03) 20px
-        );
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, var(--accent-indigo), transparent);
+        opacity: 0;
+        transition: opacity 0.3s ease;
     }
 
-    @keyframes fireAlert {
-        0%, 100% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.2), inset 0 0 20px rgba(239, 68, 68, 0.05); }
-        50% { box-shadow: 0 0 40px rgba(239, 68, 68, 0.4), inset 0 0 30px rgba(239, 68, 68, 0.1); }
+    .metric-card:hover {
+        border-color: var(--border-hover);
+        transform: translateY(-3px);
+        box-shadow: 0 12px 40px rgba(99,102,241,0.08);
     }
 
-    .alert-fire-premium h2 {
-        position: relative;
-        margin: 0;
-        font-size: 1.5rem;
-        font-weight: 800;
-        color: #fca5a5 !important;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-    }
+    .metric-card:hover::before { opacity: 1; }
 
-    .alert-fire-premium p {
-        position: relative;
-        margin: 0.5rem 0 0 0;
-        color: #fecaca;
-        font-size: 0.9rem;
-    }
-
-    .alert-safe-premium {
-        background: linear-gradient(135deg, rgba(6, 78, 59, 0.6), rgba(4, 120, 87, 0.4));
-        border: 1px solid rgba(16, 185, 129, 0.3);
-        border-radius: 16px;
-        padding: 2rem;
-        text-align: center;
-        box-shadow: 0 0 20px rgba(16, 185, 129, 0.1);
-    }
-
-    .alert-safe-premium h2 {
-        margin: 0;
-        font-size: 1.5rem;
-        font-weight: 800;
-        color: #6ee7b7 !important;
-        letter-spacing: 0.02em;
-    }
-
-    .alert-safe-premium p {
-        margin: 0.5rem 0 0 0;
-        color: #a7f3d0;
-        font-size: 0.9rem;
-    }
-
-    /* Circular gauge */
-    .gauge-container {
-        position: relative;
-        width: 130px;
-        height: 130px;
-        margin: 0 auto;
-    }
-
-    .gauge-svg {
-        transform: rotate(-90deg);
-        width: 130px;
-        height: 130px;
-    }
-
-    .gauge-bg {
-        fill: none;
-        stroke: rgba(255,255,255,0.06);
-        stroke-width: 8;
-    }
-
-    .gauge-fill {
-        fill: none;
-        stroke-width: 8;
-        stroke-linecap: round;
-        transition: stroke-dashoffset 1.5s ease;
-    }
-
-    .gauge-text {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        text-align: center;
-    }
-
-    .gauge-value {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 1.4rem;
-        font-weight: 700;
-        color: var(--text-primary);
-    }
-
-    .gauge-label {
+    .metric-label {
         font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: var(--text-muted);
+        margin-bottom: 0.6rem;
+    }
+
+    .metric-value {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 1.8rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    .metric-value.red { color: #f87171; }
+    .metric-value.green { color: #34d399; }
+    .metric-value.blue { color: #60a5fa; }
+    .metric-value.purple { color: #a78bfa; }
+
+    .metric-bar {
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(255,255,255,0.06);
+        margin-top: 0.8rem;
+        overflow: hidden;
+    }
+
+    .metric-bar-fill {
+        height: 100%;
+        border-radius: 2px;
+        transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .metric-bar-fill.red { background: linear-gradient(90deg, #f87171, #ef4444); }
+    .metric-bar-fill.green { background: linear-gradient(90deg, #34d399, #10b981); }
+    .metric-bar-fill.blue { background: linear-gradient(90deg, #60a5fa, #3b82f6); }
+    .metric-bar-fill.purple { background: linear-gradient(90deg, #a78bfa, #8b5cf6); }
+
+    /* Image panels */
+    .img-panel {
+        background: var(--bg-card);
+        border: 1px solid var(--border-glass);
+        border-radius: 14px;
+        padding: 1.2rem;
+        transition: all 0.3s ease;
+    }
+
+    .img-panel:hover {
+        border-color: var(--border-hover);
+    }
+
+    .img-panel-header {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        margin-bottom: 0.8rem;
+        padding-bottom: 0.8rem;
+        border-bottom: 1px solid var(--border-glass);
+    }
+
+    .img-panel-header span {
+        font-size: 0.75rem;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 1px;
         color: var(--text-secondary);
-        margin-top: 2px;
     }
 
-    /* Metric cards */
-    .metric-gauge {
+    .img-panel-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+    }
+
+    /* Interpretation */
+    .interp-box {
+        background: var(--bg-card);
+        border: 1px solid var(--border-glass);
+        border-radius: 14px;
+        padding: 1.5rem;
+        margin: 1.5rem 0;
+    }
+
+    .interp-box h5 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: var(--text-muted);
+        margin: 0 0 0.8rem 0;
+    }
+
+    .interp-box p {
+        font-size: 0.88rem;
+        line-height: 1.7;
+        color: var(--text-secondary);
+        margin: 0;
+    }
+
+    .interp-box strong {
+        color: var(--text-primary);
+    }
+
+    /* Info badges */
+    .info-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        margin: 1rem 0;
+    }
+
+    .info-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        background: rgba(99,102,241,0.08);
+        border: 1px solid rgba(99,102,241,0.15);
+        border-radius: 8px;
+        padding: 0.35rem 0.7rem;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.72rem;
+        color: #a5b4fc;
+    }
+
+    /* Stats dashboard */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1rem;
+        margin: 1rem 0;
+    }
+
+    .stat-card {
         background: var(--bg-card);
         border: 1px solid var(--border-glass);
         border-radius: 12px;
@@ -298,366 +456,233 @@ st.markdown("""
         transition: all 0.3s ease;
     }
 
-    .metric-gauge:hover {
-        border-color: rgba(59, 130, 246, 0.3);
+    .stat-card:hover {
+        border-color: var(--border-hover);
         transform: translateY(-2px);
     }
 
-    .metric-gauge .label {
+    .stat-number {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 2.2rem;
+        font-weight: 800;
+        margin: 0;
+    }
+
+    .stat-label {
         font-size: 0.7rem;
-        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 1px;
-        color: var(--text-secondary);
-        margin-bottom: 0.5rem;
+        color: var(--text-muted);
+        margin-top: 0.3rem;
     }
 
-    .metric-gauge .value {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 2rem;
-        font-weight: 700;
-        background: linear-gradient(135deg, #60a5fa, #a78bfa);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }
-
-    .metric-gauge .value.fire {
-        background: linear-gradient(135deg, #f87171, #fbbf24);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }
-
-    .metric-gauge .value.safe {
-        background: linear-gradient(135deg, #34d399, #60a5fa);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }
-
-    /* Confidence bar */
-    .confidence-bar {
-        height: 6px;
-        border-radius: 3px;
-        background: rgba(255,255,255,0.1);
-        margin-top: 0.5rem;
-        overflow: hidden;
-    }
-
-    .confidence-bar-fill {
-        height: 100%;
-        border-radius: 3px;
-        transition: width 1s ease;
-    }
-
-    .confidence-bar-fill.fire {
-        background: linear-gradient(90deg, #f87171, #ef4444);
-    }
-
-    .confidence-bar-fill.safe {
-        background: linear-gradient(90deg, #34d399, #10b981);
-    }
-
-    /* Risk level badge */
-    .risk-badge {
-        display: inline-block;
-        padding: 0.4rem 1rem;
+    /* Welcome */
+    .welcome-zone {
+        background: linear-gradient(135deg, rgba(99,102,241,0.04), rgba(59,130,246,0.04));
+        border: 2px dashed rgba(99,102,241,0.2);
         border-radius: 20px;
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.5px;
-        text-transform: uppercase;
-        margin-top: 0.8rem;
-    }
-
-    .risk-critical {
-        background: rgba(239, 68, 68, 0.2);
-        border: 1px solid rgba(239, 68, 68, 0.5);
-        color: #fca5a5;
-        animation: riskPulse 1s ease-in-out infinite;
-    }
-
-    .risk-high {
-        background: rgba(245, 158, 11, 0.2);
-        border: 1px solid rgba(245, 158, 11, 0.5);
-        color: #fcd34d;
-    }
-
-    .risk-moderate {
-        background: rgba(59, 130, 246, 0.2);
-        border: 1px solid rgba(59, 130, 246, 0.5);
-        color: #93c5fd;
-    }
-
-    .risk-low {
-        background: rgba(16, 185, 129, 0.2);
-        border: 1px solid rgba(16, 185, 129, 0.5);
-        color: #6ee7b7;
-    }
-
-    @keyframes riskPulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.7; }
-    }
-
-    /* Image container */
-    .image-container {
-        background: var(--bg-card);
-        border: 1px solid var(--border-glass);
-        border-radius: 12px;
-        padding: 1rem;
-        overflow: hidden;
-    }
-
-    .image-container h4 {
-        margin: 0 0 0.8rem 0;
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-
-    .image-container img {
-        border-radius: 8px;
-    }
-
-    /* Feature cards */
-    .feature-card {
-        background: var(--bg-card);
-        border: 1px solid var(--border-glass);
-        border-radius: 12px;
-        padding: 1.8rem;
+        padding: 4rem 2rem;
         text-align: center;
         transition: all 0.3s ease;
-        height: 100%;
+        position: relative;
     }
 
-    .feature-card:hover {
-        border-color: rgba(99, 102, 241, 0.4);
-        transform: translateY(-4px);
-        box-shadow: 0 12px 40px rgba(99, 102, 241, 0.15);
+    .welcome-zone:hover {
+        border-color: rgba(99,102,241,0.4);
+        background: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(59,130,246,0.06));
     }
 
-    .feature-icon {
-        width: 50px;
-        height: 50px;
-        margin: 0 auto 1rem;
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.5rem;
+    .welcome-icon {
+        font-size: 3.5rem;
+        animation: radar 3s ease-in-out infinite;
     }
 
-    .feature-card h4 {
-        margin: 0 0 0.5rem 0;
-        font-size: 1rem;
+    @keyframes radar {
+        0%, 100% { transform: scale(1); opacity: 0.8; }
+        50% { transform: scale(1.1); opacity: 1; }
+    }
+
+    .welcome-title {
+        font-size: 1.3rem;
         font-weight: 700;
         color: var(--text-primary);
+        margin: 1rem 0 0.3rem;
     }
 
-    .feature-card p {
-        margin: 0;
-        font-size: 0.8rem;
+    .welcome-desc {
+        font-size: 0.88rem;
         color: var(--text-secondary);
+        max-width: 400px;
+        margin: 0 auto;
         line-height: 1.5;
     }
 
-    /* Dropzone */
-    .dropzone {
-        background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(99, 102, 241, 0.05));
-        border: 2px dashed rgba(99, 102, 241, 0.3);
-        border-radius: 16px;
-        padding: 3rem 2rem;
+    /* Feature grid */
+    .feat-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1rem;
+        margin-top: 2.5rem;
+    }
+
+    .feat-item {
+        background: var(--bg-card);
+        border: 1px solid var(--border-glass);
+        border-radius: 12px;
+        padding: 1.5rem 1rem;
         text-align: center;
-        transition: all 0.3s ease;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
-    .dropzone:hover {
-        border-color: rgba(99, 102, 241, 0.6);
-        background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(99, 102, 241, 0.08));
+    .feat-item:hover {
+        border-color: var(--border-hover);
+        transform: translateY(-5px);
+        box-shadow: 0 20px 40px rgba(99,102,241,0.1);
     }
 
-    .dropzone-icon {
-        font-size: 3rem;
-        margin-bottom: 0.5rem;
-        animation: float 3s ease-in-out infinite;
+    .feat-emoji {
+        font-size: 1.8rem;
+        margin-bottom: 0.8rem;
     }
 
-    @keyframes float {
-        0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-8px); }
+    .feat-name {
+        font-size: 0.85rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 0.3rem;
+    }
+
+    .feat-desc {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        line-height: 1.4;
     }
 
     /* Disclaimer */
-    .disclaimer-premium {
-        background: rgba(245, 158, 11, 0.08);
-        border: 1px solid rgba(245, 158, 11, 0.2);
+    .disclaimer {
+        background: rgba(245,158,11,0.06);
+        border: 1px solid rgba(245,158,11,0.15);
         border-radius: 12px;
-        padding: 1.2rem 1.5rem;
+        padding: 1rem 1.3rem;
+        font-size: 0.78rem;
+        color: var(--accent-orange);
         margin-top: 1.5rem;
-        font-size: 0.8rem;
-        color: #fbbf24;
-    }
-
-    .disclaimer-premium strong {
-        color: #f59e0b;
     }
 
     /* Footer */
-    .footer-premium {
+    .app-footer {
         text-align: center;
-        padding: 1.5rem;
+        padding: 2rem 0;
         margin-top: 3rem;
         border-top: 1px solid var(--border-glass);
-        color: var(--text-secondary);
-        font-size: 0.75rem;
+        font-size: 0.72rem;
+        color: var(--text-muted);
     }
 
-    /* History log */
-    .history-item {
-        display: flex;
-        align-items: center;
-        gap: 0.8rem;
-        padding: 0.6rem 0.8rem;
-        border-radius: 8px;
+    /* Sidebar custom */
+    .sb-block {
         background: rgba(255,255,255,0.02);
-        border: 1px solid rgba(255,255,255,0.04);
-        margin-bottom: 0.5rem;
+        border: 1px solid rgba(255,255,255,0.05);
+        border-radius: 10px;
+        padding: 0.9rem;
+        margin: 0.7rem 0;
+    }
+
+    .sb-block-title {
+        font-size: 0.6rem;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: rgba(255,255,255,0.35) !important;
+        margin: 0 0 0.7rem 0;
+        font-weight: 600;
+    }
+
+    .sb-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.35rem 0;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
         font-size: 0.78rem;
     }
 
-    .history-dot {
-        width: 8px;
-        height: 8px;
+    .sb-row:last-child { border-bottom: none; }
+    .sb-row-label { color: rgba(255,255,255,0.45); }
+    .sb-row-val { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: rgba(255,255,255,0.85); font-size: 0.75rem; }
+
+    /* History */
+    .hist-entry {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.45rem 0.6rem;
+        border-radius: 6px;
+        margin-bottom: 0.35rem;
+        font-size: 0.72rem;
+        background: rgba(255,255,255,0.02);
+    }
+
+    .hist-dot {
+        width: 6px;
+        height: 6px;
         border-radius: 50%;
         flex-shrink: 0;
     }
 
-    .history-dot.fire { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.5); }
-    .history-dot.safe { background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,0.5); }
+    .hist-dot-fire { background: #ef4444; }
+    .hist-dot-safe { background: #10b981; }
 
-    .history-time {
-        font-family: 'JetBrains Mono', monospace;
-        color: rgba(255,255,255,0.4);
-        font-size: 0.7rem;
-    }
-
-    .history-result {
-        color: rgba(255,255,255,0.8);
-        flex: 1;
-    }
-
-    .history-conf {
-        font-family: 'JetBrains Mono', monospace;
-        font-weight: 600;
-        font-size: 0.75rem;
-    }
-
-    /* Analysis time */
-    .analysis-time {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        background: rgba(59, 130, 246, 0.1);
-        border: 1px solid rgba(59, 130, 246, 0.2);
-        border-radius: 8px;
-        padding: 0.3rem 0.7rem;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.75rem;
-        color: #93c5fd;
-    }
-
-    /* Fire particles */
-    .fire-particles {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        z-index: 0;
-        overflow: hidden;
-    }
-
-    .particle {
-        position: absolute;
-        bottom: -10px;
-        width: 4px;
-        height: 4px;
-        border-radius: 50%;
-        animation: rise linear infinite;
-        opacity: 0;
-    }
-
-    @keyframes rise {
-        0% { transform: translateY(0) scale(1); opacity: 0; }
-        10% { opacity: 0.8; }
-        90% { opacity: 0.3; }
-        100% { transform: translateY(-100vh) scale(0.3); opacity: 0; }
-    }
-
-    /* Sidebar section */
-    .sidebar-section {
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 10px;
-        padding: 1rem;
-        margin: 0.8rem 0;
-    }
-
-    .sidebar-section h4 {
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-        color: rgba(255,255,255,0.4) !important;
-        margin: 0 0 0.8rem 0;
-    }
-
-    .stat-row {
+    /* Comparison panel */
+    .comparison-header {
         display: flex;
-        justify-content: space-between;
-        padding: 0.4rem 0;
-        border-bottom: 1px solid rgba(255,255,255,0.05);
-        font-size: 0.82rem;
+        align-items: center;
+        justify-content: center;
+        gap: 1.5rem;
+        margin: 1.5rem 0;
+        padding: 1rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border-glass);
+        border-radius: 12px;
     }
 
-    .stat-row:last-child { border-bottom: none; }
-    .stat-label { color: rgba(255,255,255,0.5); }
-    .stat-value { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: rgba(255,255,255,0.9); }
-
-    /* Timestamp */
-    .timestamp {
-        font-family: 'JetBrains Mono', monospace;
+    .comp-vs {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--accent-indigo), var(--accent-purple));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
         font-size: 0.75rem;
-        color: var(--text-secondary);
-        background: rgba(255,255,255,0.03);
-        padding: 0.3rem 0.6rem;
-        border-radius: 6px;
-        border: 1px solid var(--border-glass);
+        color: white;
     }
 
-    /* Interpretation text */
-    .interpretation {
-        background: rgba(255,255,255,0.03);
-        border: 1px solid var(--border-glass);
-        border-radius: 10px;
-        padding: 1rem 1.2rem;
-        margin-top: 1rem;
-        font-size: 0.82rem;
-        line-height: 1.6;
-        color: var(--text-secondary);
+    /* Download button */
+    .stDownloadButton > button {
+        background: linear-gradient(135deg, var(--accent-indigo), var(--accent-blue)) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 10px !important;
+        padding: 0.6rem 1.5rem !important;
+        font-weight: 600 !important;
+        transition: all 0.3s ease !important;
     }
 
-    .interpretation strong {
-        color: var(--text-primary);
+    .stDownloadButton > button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 25px rgba(99,102,241,0.3) !important;
+    }
+
+    /* File uploader */
+    .stFileUploader > div {
+        border-radius: 12px !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- GradCAM implementation ---
+
+# --- GradCAM ---
 def compute_gradcam(model, input_tensor, target_layer):
     activations = []
     gradients = []
@@ -681,14 +706,12 @@ def compute_gradcam(model, input_tensor, target_layer):
 
     act = activations[0][0]
     grad = gradients[0][0]
-
     weights = grad.mean(dim=(1, 2))
     cam_map = (weights[:, None, None] * act).sum(dim=0)
     cam_map = torch.relu(cam_map)
     cam_map = cam_map - cam_map.min()
     if cam_map.max() > 0:
         cam_map = cam_map / cam_map.max()
-
     cam_map = cam_map.unsqueeze(0).unsqueeze(0)
     cam_map = torch.nn.functional.interpolate(cam_map, size=(224, 224), mode='bilinear', align_corners=False)
     return cam_map[0, 0].numpy()
@@ -703,69 +726,39 @@ def overlay_cam_on_image(img_array, cam_map, alpha=0.5):
 
 
 def get_risk_level(pred_class, confidence):
-    """Return risk level, class, and interpretation."""
     if pred_class == 'fire':
         if confidence >= 0.9:
-            return 'CRITIQUE', 'risk-critical', 'Forte probabilit\u00e9 de d\u00e9part de feu. V\u00e9rification imm\u00e9diate requise. Le mod\u00e8le est tr\u00e8s confiant dans sa d\u00e9tection.'
+            return 'CRITIQUE', 'risk-critical', 'Forte probabilit\u00e9 de d\u00e9part de feu. V\u00e9rification imm\u00e9diate requise.'
         elif confidence >= 0.7:
-            return '\u00c9LEV\u00c9', 'risk-high', 'Suspicion de feu avec confiance mod\u00e9r\u00e9e. Confirmation visuelle recommand\u00e9e avant d\u00e9clenchement du protocole.'
+            return '\u00c9LEV\u00c9', 'risk-high', 'Suspicion importante. Confirmation visuelle recommand\u00e9e.'
         else:
-            return 'MOD\u00c9R\u00c9', 'risk-moderate', 'Signal faible d\u00e9tect\u00e9. Possibilit\u00e9 de faux positif (fum\u00e9e, reflets, coucher de soleil). V\u00e9rification conseill\u00e9e.'
+            return 'MOD\u00c9R\u00c9', 'risk-moderate', 'Signal faible. Possibilit\u00e9 de faux positif (reflets, coucher de soleil).'
     else:
         if confidence >= 0.9:
-            return 'FAIBLE', 'risk-low', 'Zone s\u00e9curis\u00e9e. Le mod\u00e8le n\'identifie aucun signe de d\u00e9part de feu avec une tr\u00e8s haute confiance.'
+            return 'FAIBLE', 'risk-low', 'Zone s\u00e9curis\u00e9e. Aucun signe de feu identifi\u00e9.'
         else:
-            return 'MOD\u00c9R\u00c9', 'risk-moderate', 'Pas de feu d\u00e9tect\u00e9 mais confiance limit\u00e9e. Conditions m\u00e9t\u00e9o ou qualit\u00e9 d\'image possiblement d\u00e9grad\u00e9es.'
+            return 'MOD\u00c9R\u00c9', 'risk-moderate', 'Pas de feu d\u00e9tect\u00e9 mais confiance limit\u00e9e.'
 
 
-def svg_gauge(value, color_start, color_end, label):
-    """Generate SVG circular gauge."""
-    circumference = 2 * 3.14159 * 52
+def svg_gauge(value, color1, color2, label):
+    circumference = 2 * 3.14159 * 45
     offset = circumference * (1 - value)
+    uid = label.replace(' ', '_')
     return f"""
-    <div class="gauge-container">
-        <svg class="gauge-svg" viewBox="0 0 120 120">
-            <circle class="gauge-bg" cx="60" cy="60" r="52"/>
-            <circle class="gauge-fill" cx="60" cy="60" r="52"
-                stroke="url(#grad-{label})"
-                stroke-dasharray="{circumference}"
-                stroke-dashoffset="{offset}"/>
-            <defs>
-                <linearGradient id="grad-{label}" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" style="stop-color:{color_start}"/>
-                    <stop offset="100%" style="stop-color:{color_end}"/>
-                </linearGradient>
-            </defs>
+    <div style="position:relative; width:120px; height:120px; margin:0 auto;">
+        <svg viewBox="0 0 100 100" style="transform:rotate(-90deg); width:120px; height:120px;">
+            <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="7"/>
+            <circle cx="50" cy="50" r="45" fill="none" stroke="url(#g{uid})" stroke-width="7"
+                stroke-linecap="round" stroke-dasharray="{circumference}" stroke-dashoffset="{offset}"
+                style="transition: stroke-dashoffset 1.5s cubic-bezier(0.4,0,0.2,1);"/>
+            <defs><linearGradient id="g{uid}"><stop offset="0%" stop-color="{color1}"/><stop offset="100%" stop-color="{color2}"/></linearGradient></defs>
         </svg>
-        <div class="gauge-text">
-            <div class="gauge-value">{value:.0%}</div>
-            <div class="gauge-label">{label}</div>
+        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center;">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:1.3rem; font-weight:700; color:{color1};">{value:.0%}</div>
+            <div style="font-size:0.55rem; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); margin-top:2px;">{label}</div>
         </div>
     </div>
     """
-
-
-def generate_particles_html():
-    """Generate fire particles CSS animation."""
-    particles = ""
-    import random
-    for i in range(20):
-        left = random.randint(0, 100)
-        delay = random.uniform(0, 5)
-        duration = random.uniform(4, 8)
-        size = random.uniform(2, 5)
-        color = random.choice(['#ef4444', '#f97316', '#fbbf24', '#f87171'])
-        particles += f"""
-        <div class="particle" style="
-            left: {left}%;
-            animation-delay: {delay:.1f}s;
-            animation-duration: {duration:.1f}s;
-            width: {size:.0f}px;
-            height: {size:.0f}px;
-            background: {color};
-            box-shadow: 0 0 {size*2:.0f}px {color};
-        "></div>"""
-    return f'<div class="fire-particles">{particles}</div>'
 
 
 # --- Load model ---
@@ -774,9 +767,7 @@ MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_weig
 @st.cache_resource
 def load_model():
     model = AutoModelForImageClassification.from_pretrained(
-        MODEL_DIR,
-        num_labels=2,
-        ignore_mismatched_sizes=True
+        MODEL_DIR, num_labels=2, ignore_mismatched_sizes=True
     )
     model.eval()
     return model
@@ -788,9 +779,8 @@ val_transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
-mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-
+mean_t = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+std_t = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
 class_names = ['fire', 'no_fire']
 
 class GradCAMModel(torch.nn.Module):
@@ -798,7 +788,6 @@ class GradCAMModel(torch.nn.Module):
         super().__init__()
         self.model = model
         self.efficientnet = model.efficientnet
-
     def forward(self, x):
         return self.model(x).logits
 
@@ -806,239 +795,240 @@ gradcam_model = GradCAMModel(model)
 gradcam_model.eval()
 target_layer = gradcam_model.efficientnet.encoder.blocks[-1]
 
-# --- SIDEBAR ---
+
+# ========== SIDEBAR ==========
 with st.sidebar:
     st.markdown("""
-    <div style="text-align:center; padding: 1.5rem 0 1rem 0;">
-        <div style="width:60px; height:60px; margin:0 auto; background: linear-gradient(135deg, #ef4444, #dc2626);
-             border-radius:14px; display:flex; align-items:center; justify-content:center; font-size:1.8rem;
-             box-shadow: 0 8px 24px rgba(239,68,68,0.3);">\U0001f525</div>
-        <h2 style="margin: 0.8rem 0 0.2rem 0; font-size: 1.2rem; font-weight: 800; letter-spacing: -0.02em;">VIGIE IA</h2>
-        <p style="margin:0; font-size: 0.75rem; opacity: 0.5; letter-spacing: 2px;">SDIS 44 \u2022 PROTOTYPE</p>
+    <div style="text-align:center; padding:1.5rem 0 0.5rem;">
+        <div style="width:56px; height:56px; margin:0 auto; background:linear-gradient(135deg,#ef4444,#991b1b);
+             border-radius:14px; display:flex; align-items:center; justify-content:center; font-size:1.6rem;
+             box-shadow: 0 0 30px rgba(239,68,68,0.25);">\U0001f525</div>
+        <h2 style="margin:0.6rem 0 0; font-size:1.1rem; font-weight:800; letter-spacing:-0.02em;">VIGIE IA</h2>
+        <p style="margin:0; font-size:0.68rem; opacity:0.4; letter-spacing:2px;">SDIS 44 \u2022 v2.0</p>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
-    <div class="sidebar-section">
-        <h4>Mod\u00e8le</h4>
-        <div class="stat-row"><span class="stat-label">Architecture</span><span class="stat-value">EfficientNet-B0</span></div>
-        <div class="stat-row"><span class="stat-label">Entr\u00e9e</span><span class="stat-value">224\u00d7224 RGB</span></div>
-        <div class="stat-row"><span class="stat-label">Classes</span><span class="stat-value">2 (feu / normal)</span></div>
-        <div class="stat-row"><span class="stat-label">Param\u00e8tres</span><span class="stat-value">~5.3M</span></div>
+    <div class="sb-block">
+        <div class="sb-block-title">Mod\u00e8le</div>
+        <div class="sb-row"><span class="sb-row-label">Architecture</span><span class="sb-row-val">EfficientNet-B0</span></div>
+        <div class="sb-row"><span class="sb-row-label">Entr\u00e9e</span><span class="sb-row-val">224\u00d7224</span></div>
+        <div class="sb-row"><span class="sb-row-label">Param\u00e8tres</span><span class="sb-row-val">5.3M</span></div>
+        <div class="sb-row"><span class="sb-row-label">Framework</span><span class="sb-row-val">PyTorch + HF</span></div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
-    <div class="sidebar-section">
-        <h4>Performances (test set)</h4>
-        <div class="stat-row"><span class="stat-label">Accuracy</span><span class="stat-value" style="color:#10b981 !important;">93%</span></div>
-        <div class="stat-row"><span class="stat-label">AUC-ROC</span><span class="stat-value" style="color:#10b981 !important;">0.984</span></div>
-        <div class="stat-row"><span class="stat-label">Pr\u00e9cision (feu)</span><span class="stat-value">0.99</span></div>
-        <div class="stat-row"><span class="stat-label">Rappel (feu)</span><span class="stat-value">0.91</span></div>
+    <div class="sb-block">
+        <div class="sb-block-title">Performances</div>
+        <div class="sb-row"><span class="sb-row-label">Accuracy</span><span class="sb-row-val" style="color:#10b981 !important;">93%</span></div>
+        <div class="sb-row"><span class="sb-row-label">AUC-ROC</span><span class="sb-row-val" style="color:#10b981 !important;">0.984</span></div>
+        <div class="sb-row"><span class="sb-row-label">Pr\u00e9cision (feu)</span><span class="sb-row-val">0.99</span></div>
+        <div class="sb-row"><span class="sb-row-label">Rappel (feu)</span><span class="sb-row-val">0.91</span></div>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("""
-    <div class="sidebar-section">
-        <h4>Protocole</h4>
-        <div style="font-size: 0.78rem; line-height: 1.8; color: rgba(255,255,255,0.6);">
-            <span style="color:#3b82f6;">\u2460</span> T\u00e9l\u00e9verser l'image<br>
-            <span style="color:#3b82f6;">\u2461</span> Lire la pr\u00e9diction IA<br>
-            <span style="color:#3b82f6;">\u2462</span> V\u00e9rifier le GradCAM<br>
-            <span style="color:#3b82f6;">\u2463</span> Confirmer l'alerte<br>
-            <span style="color:#ef4444;">\u2464</span> D\u00e9clencher protocole
+    # Session stats
+    total = len(st.session_state.history)
+    if total > 0:
+        st.markdown(f"""
+        <div class="sb-block">
+            <div class="sb-block-title">Session</div>
+            <div class="sb-row"><span class="sb-row-label">Analyses</span><span class="sb-row-val">{total}</span></div>
+            <div class="sb-row"><span class="sb-row-label">Alertes feu</span><span class="sb-row-val" style="color:#f87171 !important;">{st.session_state.total_fires}</span></div>
+            <div class="sb-row"><span class="sb-row-label">Normales</span><span class="sb-row-val" style="color:#34d399 !important;">{st.session_state.total_safe}</span></div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # --- Session History ---
-    if st.session_state.history:
-        st.markdown("""
-        <div class="sidebar-section">
-            <h4>Historique de session</h4>
         """, unsafe_allow_html=True)
-        for entry in reversed(st.session_state.history[-8:]):
-            dot_class = "fire" if entry['class'] == 'fire' else "safe"
-            result_text = "\U0001f525 Feu" if entry['class'] == 'fire' else "\u2705 Normal"
-            conf_color = "#f87171" if entry['class'] == 'fire' else "#6ee7b7"
+
+    # History
+    if st.session_state.history:
+        st.markdown('<div class="sb-block"><div class="sb-block-title">Historique</div>', unsafe_allow_html=True)
+        for entry in reversed(st.session_state.history[-6:]):
+            dot = "hist-dot-fire" if entry['class'] == 'fire' else "hist-dot-safe"
+            icon = "\U0001f525" if entry['class'] == 'fire' else "\u2705"
             st.markdown(f"""
-            <div class="history-item">
-                <div class="history-dot {dot_class}"></div>
-                <span class="history-time">{entry['time']}</span>
-                <span class="history-result">{result_text}</span>
-                <span class="history-conf" style="color:{conf_color};">{entry['confidence']:.0%}</span>
+            <div class="hist-entry">
+                <div class="hist-dot {dot}"></div>
+                <span style="color:rgba(255,255,255,0.4); font-family:'JetBrains Mono',monospace;">{entry['time']}</span>
+                <span style="color:rgba(255,255,255,0.7); flex:1;">{icon} {entry['confidence']:.0%}</span>
             </div>
             """, unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("""
-    <div style="text-align:center; font-size:0.7rem; opacity:0.4; margin-top:2rem; padding-top:1rem; border-top: 1px solid rgba(255,255,255,0.06);">
-        SDIS de Loire-Atlantique<br>
-        Urgences : <strong>18</strong> ou <strong>112</strong><br><br>
-        Allaire & Loret \u2022 Sup de Vinci M1
+    <div style="text-align:center; font-size:0.65rem; opacity:0.3; margin-top:2rem; padding-top:0.8rem; border-top:1px solid rgba(255,255,255,0.05);">
+        Allaire & Loret<br>Sup de Vinci M1<br>2025-2026
     </div>
     """, unsafe_allow_html=True)
 
-# --- MAIN CONTENT ---
+
+# ========== HERO ==========
 st.markdown("""
-<div class="hero-banner">
-    <span class="hero-badge">\u25cf Syst\u00e8me actif</span>
-    <div class="hero-content">
-        <div class="hero-icon">\U0001f525</div>
-        <div class="hero-text">
-            <h1>Vigie IA \u2014 D\u00e9tection Feux de For\u00eat</h1>
-            <p>Syst\u00e8me d'aide \u00e0 la d\u00e9cision par intelligence artificielle \u2022 SDIS 44 Loire-Atlantique</p>
+<div class="hero">
+    <div class="hero-inner">
+        <div class="hero-left">
+            <div class="hero-logo">\U0001f525</div>
+            <div>
+                <h1 class="hero-title">Vigie IA \u2014 D\u00e9tection Feux de For\u00eat</h1>
+                <p class="hero-subtitle">SDIS 44 \u2022 Loire-Atlantique \u2022 Syst\u00e8me d'aide \u00e0 la d\u00e9cision</p>
+            </div>
+        </div>
+        <div class="hero-status">
+            <div class="hero-status-dot"></div>
+            Syst\u00e8me op\u00e9rationnel
         </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
-# Upload
-uploaded_file = st.file_uploader(
-    "T\u00e9l\u00e9verser une image",
-    type=['jpg', 'jpeg', 'png'],
-    help="Formats accept\u00e9s : JPG, JPEG, PNG",
-    label_visibility="collapsed"
-)
 
-if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert('RGB')
+# ========== TABS ==========
+tab_analyse, tab_multi, tab_dashboard = st.tabs(["\U0001f50d  Analyse", "\U0001f4ca  Multi-analyse", "\U0001f4cb  Dashboard"])
 
-    # Measure analysis time
-    start_time = time.time()
+# ========== TAB 1: ANALYSE ==========
+with tab_analyse:
+    uploaded_file = st.file_uploader(
+        "T\u00e9l\u00e9verser une image",
+        type=['jpg', 'jpeg', 'png'],
+        help="Formats : JPG, JPEG, PNG",
+        label_visibility="collapsed",
+        key="single_upload"
+    )
 
-    img_tensor = val_transform(image)
-    input_tensor = img_tensor.unsqueeze(0).requires_grad_(True)
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file).convert('RGB')
+        start_time = time.time()
 
-    with torch.no_grad():
-        outputs = model(input_tensor)
-        probabilities = torch.softmax(outputs.logits, dim=-1)[0]
+        img_tensor = val_transform(image)
+        input_tensor = img_tensor.unsqueeze(0)
 
-    pred_idx = probabilities.argmax().item()
-    pred_class = class_names[pred_idx]
-    confidence = probabilities[pred_idx].item()
-    fire_prob = probabilities[0].item()
-    no_fire_prob = probabilities[1].item()
+        with torch.no_grad():
+            outputs = model(input_tensor)
+            probabilities = torch.softmax(outputs.logits, dim=-1)[0]
 
-    # GradCAM
-    input_cam = img_tensor.unsqueeze(0).requires_grad_(True)
-    grayscale_cam = compute_gradcam(gradcam_model, input_cam, target_layer)
-    img_display = (img_tensor * std + mean).permute(1, 2, 0).numpy().clip(0, 1)
-    overlay = overlay_cam_on_image(img_display, grayscale_cam)
+        pred_idx = probabilities.argmax().item()
+        pred_class = class_names[pred_idx]
+        confidence = probabilities[pred_idx].item()
+        fire_prob = probabilities[0].item()
+        no_fire_prob = probabilities[1].item()
 
-    analysis_time = time.time() - start_time
+        input_cam = img_tensor.unsqueeze(0).requires_grad_(True)
+        grayscale_cam = compute_gradcam(gradcam_model, input_cam, target_layer)
+        img_display = (img_tensor * std_t + mean_t).permute(1, 2, 0).numpy().clip(0, 1)
+        overlay = overlay_cam_on_image(img_display, grayscale_cam)
 
-    # Add to history
-    st.session_state.history.append({
-        'time': datetime.now().strftime('%H:%M:%S'),
-        'class': pred_class,
-        'confidence': confidence,
-        'filename': uploaded_file.name
-    })
+        analysis_time = time.time() - start_time
 
-    # Risk level
-    risk_label, risk_class, interpretation = get_risk_level(pred_class, confidence)
+        # Update session
+        st.session_state.history.append({
+            'time': datetime.now().strftime('%H:%M:%S'),
+            'class': pred_class,
+            'confidence': confidence,
+            'filename': uploaded_file.name
+        })
+        if pred_class == 'fire':
+            st.session_state.total_fires += 1
+        else:
+            st.session_state.total_safe += 1
 
-    # Fire particles if fire detected
-    if pred_class == 'fire':
-        st.markdown(generate_particles_html(), unsafe_allow_html=True)
+        risk_label, risk_class, interpretation = get_risk_level(pred_class, confidence)
 
-    # --- Alert ---
-    if pred_class == 'fire':
+        # Alert
+        if pred_class == 'fire':
+            st.markdown(f"""
+            <div class="alert-panel alert-fire">
+                <h2>\U0001f6a8 ALERTE \u2014 FEU D\u00c9TECT\u00c9</h2>
+                <p class="alert-sub">Confiance : <strong>{confidence:.1%}</strong> \u2022 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
+                <div class="risk-badge {risk_class}">\u25cf Niveau : {risk_label}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="alert-panel alert-safe">
+                <h2>\u2705 AUCUNE MENACE</h2>
+                <p class="alert-sub">Confiance : <strong>{confidence:.1%}</strong> \u2022 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
+                <div class="risk-badge {risk_class}">\u25cf Niveau : {risk_label}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Info badges
         st.markdown(f"""
-        <div class="alert-fire-premium">
-            <h2>\U0001f6a8 ALERTE \u2014 D\u00c9PART DE FEU D\u00c9TECT\u00c9</h2>
-            <p>Confiance : <strong>{confidence:.1%}</strong> \u2022 {datetime.now().strftime('%d/%m/%Y \u00e0 %H:%M:%S')}</p>
-            <div class="risk-badge {risk_class}">Niveau de risque : {risk_label}</div>
+        <div class="info-row">
+            <span class="info-badge">\u23f1 {analysis_time:.2f}s</span>
+            <span class="info-badge">\U0001f4c4 {uploaded_file.name}</span>
+            <span class="info-badge">\U0001f4d0 {image.size[0]}\u00d7{image.size[1]}px</span>
+            <span class="info-badge">\U0001f9e0 EfficientNet-B0</span>
         </div>
         """, unsafe_allow_html=True)
-    else:
+
+        # Gauges
+        col_g1, col_g2, col_g3, col_g4 = st.columns(4)
+        with col_g1:
+            st.markdown(f'<div class="metric-card">{svg_gauge(fire_prob, "#f87171", "#ef4444", "FEU")}</div>', unsafe_allow_html=True)
+        with col_g2:
+            st.markdown(f'<div class="metric-card">{svg_gauge(no_fire_prob, "#34d399", "#10b981", "NORMAL")}</div>', unsafe_allow_html=True)
+        with col_g3:
+            st.markdown(f'<div class="metric-card">{svg_gauge(confidence, "#60a5fa", "#3b82f6", "CONFIANCE")}</div>', unsafe_allow_html=True)
+        with col_g4:
+            st.markdown(f"""
+            <div class="metric-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:150px;">
+                <div class="metric-label">Temps</div>
+                <div class="metric-value blue">{analysis_time:.2f}s</div>
+                <div style="font-size:0.65rem; color:var(--text-muted); margin-top:0.5rem;">Inf\u00e9rence GPU/CPU</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Images side by side
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+            <div class="img-panel">
+                <div class="img-panel-header">
+                    <div class="img-panel-dot" style="background:#3b82f6;"></div>
+                    <span>Image source (224\u00d7224)</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.image(image.resize((224, 224)), use_container_width=True)
+        with col2:
+            st.markdown("""
+            <div class="img-panel">
+                <div class="img-panel-header">
+                    <div class="img-panel-dot" style="background:#a855f7;"></div>
+                    <span>GradCAM \u2014 Attention (224\u00d7224)</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.image(overlay, use_container_width=True)
+
+        # Interpretation
         st.markdown(f"""
-        <div class="alert-safe-premium">
-            <h2>\u2705 AUCUNE MENACE D\u00c9TECT\u00c9E</h2>
-            <p>Confiance : <strong>{confidence:.1%}</strong> \u2022 {datetime.now().strftime('%d/%m/%Y \u00e0 %H:%M:%S')}</p>
-            <div class="risk-badge {risk_class}">Niveau de risque : {risk_label}</div>
+        <div class="interp-box">
+            <h5>\U0001f4cb Interpr\u00e9tation de l'analyse</h5>
+            <p><strong>R\u00e9sultat :</strong> {interpretation}</p>
+            <p style="margin-top:0.8rem;"><strong>GradCAM :</strong> Les zones lumineuses montrent o\u00f9 le mod\u00e8le
+            concentre son attention. V\u00e9rifiez qu'elles correspondent \u00e0 des \u00e9l\u00e9ments pertinents
+            (flammes, fum\u00e9e) et non \u00e0 des artefacts visuels.</p>
         </div>
         """, unsafe_allow_html=True)
 
-    # Analysis time badge
-    st.markdown(f"""
-    <div style="margin: 1rem 0; display:flex; align-items:center; gap:1rem;">
-        <span class="analysis-time">\u23f1 Analyse : {analysis_time:.2f}s</span>
-        <span class="analysis-time">\U0001f4c4 {uploaded_file.name}</span>
-        <span class="analysis-time">\U0001f4d0 {image.size[0]}\u00d7{image.size[1]}px</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # --- Circular Gauges ---
-    col_g1, col_g2, col_g3 = st.columns(3)
-    with col_g1:
-        st.markdown(f"""
-        <div class="metric-gauge">
-            {svg_gauge(fire_prob, '#f87171', '#ef4444', 'FEU')}
-        </div>
-        """, unsafe_allow_html=True)
-    with col_g2:
-        st.markdown(f"""
-        <div class="metric-gauge">
-            {svg_gauge(no_fire_prob, '#34d399', '#10b981', 'NORMAL')}
-        </div>
-        """, unsafe_allow_html=True)
-    with col_g3:
-        st.markdown(f"""
-        <div class="metric-gauge">
-            {svg_gauge(confidence, '#60a5fa', '#a78bfa', 'CONFIANCE')}
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # --- Images ---
-    image_resized = image.resize((224, 224))
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("""
-        <div class="image-container">
-            <h4>\U0001f4f7 Image source</h4>
-        </div>
-        """, unsafe_allow_html=True)
-        st.image(image_resized, use_container_width=True)
-    with col2:
-        st.markdown("""
-        <div class="image-container">
-            <h4>\U0001f9e0 GradCAM \u2014 Carte d'attention</h4>
-        </div>
-        """, unsafe_allow_html=True)
-        st.image(overlay, use_container_width=True)
-
-    # --- Interpretation ---
-    st.markdown(f"""
-    <div class="interpretation">
-        <strong>\U0001f4cb Interpr\u00e9tation :</strong> {interpretation}
-        <br><br>
-        <strong>\U0001f9e0 GradCAM :</strong> Les zones lumineuses sur la carte d'attention montrent les r\u00e9gions
-        de l'image ayant le plus influenc\u00e9 la d\u00e9cision. V\u00e9rifiez que ces zones correspondent bien
-        \u00e0 des \u00e9l\u00e9ments pertinents (flammes, fum\u00e9e) et non \u00e0 des artefacts.
-    </div>
-    """, unsafe_allow_html=True)
-
-    # --- Download report ---
-    report_text = f"""RAPPORT D'ANALYSE - VIGIE IA SDIS 44
+        # Download report
+        report = f"""RAPPORT D'ANALYSE - VIGIE IA SDIS 44
 {'='*50}
 Date : {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
 Fichier : {uploaded_file.name}
 Dimensions : {image.size[0]}x{image.size[1]} pixels
-Temps d'analyse : {analysis_time:.2f}s
+Temps d'analyse : {analysis_time:.3f}s
 
 RESULTAT
 {'-'*50}
-Prediction : {'FEU DETECTE' if pred_class == 'fire' else 'PAS DE FEU'}
+Prediction : {'FEU DETECTE' if pred_class == 'fire' else 'AUCUN FEU'}
 Confiance : {confidence:.1%}
 Niveau de risque : {risk_label}
-P(feu) : {fire_prob:.4f}
-P(normal) : {no_fire_prob:.4f}
+P(feu) = {fire_prob:.4f}
+P(normal) = {no_fire_prob:.4f}
 
 INTERPRETATION
 {'-'*50}
@@ -1046,87 +1036,221 @@ INTERPRETATION
 
 AVERTISSEMENT
 {'-'*50}
-Ce systeme est un outil d'aide a la decision uniquement.
+Outil d'aide a la decision uniquement.
 Toute alerte doit etre confirmee par un operateur qualifie.
 """
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.download_button(
-        label="\U0001f4e5 T\u00e9l\u00e9charger le rapport d'analyse",
-        data=report_text,
-        file_name=f"rapport_vigie_ia_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-        mime="text/plain"
-    )
+        col_dl, _ = st.columns([1, 3])
+        with col_dl:
+            st.download_button(
+                "\U0001f4e5 T\u00e9l\u00e9charger le rapport",
+                data=report,
+                file_name=f"rapport_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                mime="text/plain"
+            )
 
-    # --- Disclaimer ---
+        # Disclaimer
+        st.markdown("""
+        <div class="disclaimer">
+            <strong>\u26a0\ufe0f</strong> Outil d'aide \u00e0 la d\u00e9cision uniquement. Toute alerte doit \u00eatre confirm\u00e9e
+            par un op\u00e9rateur qualifi\u00e9 avant intervention.
+        </div>
+        """, unsafe_allow_html=True)
+
+    else:
+        # Welcome
+        st.markdown("")
+        col_w1, col_w2, col_w3 = st.columns([1, 2, 1])
+        with col_w2:
+            st.markdown("""
+            <div class="welcome-zone">
+                <div class="welcome-icon">\U0001f4e1</div>
+                <div class="welcome-title">En attente d'image</div>
+                <p class="welcome-desc">T\u00e9l\u00e9versez une capture de cam\u00e9ra de surveillance pour lancer l'analyse de d\u00e9tection de feux de for\u00eat.</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="feat-grid">
+            <div class="feat-item">
+                <div class="feat-emoji">\U0001f9e0</div>
+                <div class="feat-name">Deep Learning</div>
+                <div class="feat-desc">EfficientNet-B0 fine-tun\u00e9 sp\u00e9cifiquement</div>
+            </div>
+            <div class="feat-item">
+                <div class="feat-emoji">\u26a1</div>
+                <div class="feat-name">Temps r\u00e9el</div>
+                <div class="feat-desc">Inf\u00e9rence en moins de 2 secondes</div>
+            </div>
+            <div class="feat-item">
+                <div class="feat-emoji">\U0001f50d</div>
+                <div class="feat-name">Explicabilit\u00e9</div>
+                <div class="feat-desc">GradCAM pour la transparence IA</div>
+            </div>
+            <div class="feat-item">
+                <div class="feat-emoji">\U0001f3af</div>
+                <div class="feat-name">AUC 0.984</div>
+                <div class="feat-desc">Valid\u00e9 sur jeu de test ind\u00e9pendant</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# ========== TAB 2: MULTI-ANALYSE ==========
+with tab_multi:
     st.markdown("""
-    <div class="disclaimer-premium">
-        <strong>\u26a0\ufe0f AVERTISSEMENT</strong> \u2014 Ce syst\u00e8me est un outil d'aide \u00e0 la d\u00e9cision uniquement.
-        Toute alerte doit imp\u00e9rativement \u00eatre confirm\u00e9e par un op\u00e9rateur qualifi\u00e9 avant d\u00e9clenchement
-        du protocole d'intervention. Aucune d\u00e9cision op\u00e9rationnelle ne doit \u00eatre prise sur la seule base de cette analyse.
+    <div class="interp-box">
+        <h5>\U0001f4f7 Analyse par lot</h5>
+        <p>T\u00e9l\u00e9versez plusieurs images pour les analyser simultan\u00e9ment et comparer les r\u00e9sultats.</p>
     </div>
     """, unsafe_allow_html=True)
 
-else:
-    # --- Welcome state ---
-    st.markdown("<br>", unsafe_allow_html=True)
+    multi_files = st.file_uploader(
+        "T\u00e9l\u00e9verser plusieurs images",
+        type=['jpg', 'jpeg', 'png'],
+        accept_multiple_files=True,
+        label_visibility="collapsed",
+        key="multi_upload"
+    )
 
-    col_w1, col_w2, col_w3 = st.columns([1, 2, 1])
-    with col_w2:
-        st.markdown("""
-        <div class="dropzone">
-            <div class="dropzone-icon">\U0001f4e1</div>
-            <h3 style="color: var(--text-primary); margin: 0.5rem 0; font-weight: 700;">En attente d'image</h3>
-            <p style="color: var(--text-secondary); margin: 0; font-size: 0.85rem;">
-                Glissez-d\u00e9posez ou s\u00e9lectionnez une capture de cam\u00e9ra de surveillance
-            </p>
-            <p style="color: rgba(255,255,255,0.3); font-size: 0.75rem; margin-top: 0.5rem;">
-                JPG \u2022 JPEG \u2022 PNG
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+    if multi_files:
+        results = []
+        for f in multi_files:
+            img = Image.open(f).convert('RGB')
+            t = val_transform(img)
+            with torch.no_grad():
+                out = model(t.unsqueeze(0))
+                probs = torch.softmax(out.logits, dim=-1)[0]
+            idx = probs.argmax().item()
+            results.append({
+                'name': f.name,
+                'image': img.resize((224, 224)),
+                'class': class_names[idx],
+                'confidence': probs[idx].item(),
+                'fire_prob': probs[0].item()
+            })
 
-    st.markdown("<br><br>", unsafe_allow_html=True)
-
-    # Feature cards
-    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
-    with col_f1:
-        st.markdown("""
-        <div class="feature-card">
-            <div class="feature-icon" style="background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(59,130,246,0.2));">\U0001f9e0</div>
-            <h4>Deep Learning</h4>
-            <p>EfficientNet-B0 fine-tun\u00e9 sur 1000+ images</p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_f2:
-        st.markdown("""
-        <div class="feature-card">
-            <div class="feature-icon" style="background: linear-gradient(135deg, rgba(239,68,68,0.2), rgba(245,158,11,0.2));">\u26a1</div>
-            <h4>Temps r\u00e9el</h4>
-            <p>Analyse instantan\u00e9e en quelques secondes</p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_f3:
-        st.markdown("""
-        <div class="feature-card">
-            <div class="feature-icon" style="background: linear-gradient(135deg, rgba(16,185,129,0.2), rgba(52,211,153,0.2));">\U0001f50d</div>
-            <h4>Explicabilit\u00e9</h4>
-            <p>GradCAM pour comprendre les d\u00e9cisions IA</p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_f4:
-        st.markdown("""
-        <div class="feature-card">
-            <div class="feature-icon" style="background: linear-gradient(135deg, rgba(168,85,247,0.2), rgba(139,92,246,0.2));">\U0001f4ca</div>
-            <h4>AUC 0.984</h4>
-            <p>Performance valid\u00e9e sur jeu de test ind\u00e9pendant</p>
+        # Summary
+        n_fire = sum(1 for r in results if r['class'] == 'fire')
+        n_safe = len(results) - n_fire
+        st.markdown(f"""
+        <div class="comparison-header">
+            <div style="text-align:center;">
+                <div style="font-size:2rem;">\U0001f525</div>
+                <div style="font-family:'JetBrains Mono',monospace; font-size:1.5rem; font-weight:800; color:#f87171;">{n_fire}</div>
+                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">Alertes</div>
+            </div>
+            <div class="comp-vs">VS</div>
+            <div style="text-align:center;">
+                <div style="font-size:2rem;">\U0001f333</div>
+                <div style="font-family:'JetBrains Mono',monospace; font-size:1.5rem; font-weight:800; color:#34d399;">{n_safe}</div>
+                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">Normales</div>
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
-# --- Footer ---
+        # Grid of results
+        cols_per_row = 3
+        for i in range(0, len(results), cols_per_row):
+            cols = st.columns(cols_per_row)
+            for j, col in enumerate(cols):
+                if i + j < len(results):
+                    r = results[i + j]
+                    with col:
+                        border_color = "rgba(239,68,68,0.4)" if r['class'] == 'fire' else "rgba(16,185,129,0.3)"
+                        icon = "\U0001f525" if r['class'] == 'fire' else "\u2705"
+                        color = "#f87171" if r['class'] == 'fire' else "#34d399"
+                        st.markdown(f"""
+                        <div style="background:var(--bg-card); border:1px solid {border_color}; border-radius:12px; padding:1rem; margin-bottom:1rem;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                                <span style="font-size:0.75rem; color:var(--text-secondary);">{r['name'][:20]}</span>
+                                <span style="font-family:'JetBrains Mono',monospace; font-weight:700; color:{color};">{icon} {r['confidence']:.0%}</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.image(r['image'], use_container_width=True)
+
+
+# ========== TAB 3: DASHBOARD ==========
+with tab_dashboard:
+    total = len(st.session_state.history)
+
+    if total == 0:
+        st.markdown("""
+        <div class="welcome-zone" style="padding:3rem;">
+            <div class="welcome-icon">\U0001f4ca</div>
+            <div class="welcome-title">Aucune donn\u00e9e</div>
+            <p class="welcome-desc">Lancez des analyses dans l'onglet "Analyse" pour voir les statistiques ici.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        fires = st.session_state.total_fires
+        safe = st.session_state.total_safe
+        avg_conf = np.mean([h['confidence'] for h in st.session_state.history])
+        fire_rate = fires / total if total > 0 else 0
+
+        # Stats cards
+        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+        with col_s1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">Total analyses</div>
+                <div class="metric-value blue">{total}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_s2:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">Alertes feu</div>
+                <div class="metric-value red">{fires}</div>
+                <div class="metric-bar"><div class="metric-bar-fill red" style="width:{fire_rate*100:.0f}%"></div></div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_s3:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">Zones s\u00fbres</div>
+                <div class="metric-value green">{safe}</div>
+                <div class="metric-bar"><div class="metric-bar-fill green" style="width:{((1-fire_rate)*100):.0f}%"></div></div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_s4:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">Confiance moy.</div>
+                <div class="metric-value purple">{avg_conf:.0%}</div>
+                <div class="metric-bar"><div class="metric-bar-fill purple" style="width:{avg_conf*100:.0f}%"></div></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Full history table
+        st.markdown("""
+        <div class="interp-box">
+            <h5>Journal complet des analyses</h5>
+        </div>
+        """, unsafe_allow_html=True)
+
+        for entry in reversed(st.session_state.history):
+            icon = "\U0001f525" if entry['class'] == 'fire' else "\u2705"
+            border = "rgba(239,68,68,0.3)" if entry['class'] == 'fire' else "rgba(16,185,129,0.2)"
+            color = "#f87171" if entry['class'] == 'fire' else "#34d399"
+            st.markdown(f"""
+            <div style="display:flex; align-items:center; gap:1rem; padding:0.7rem 1rem; margin:0.4rem 0;
+                 background:var(--bg-card); border:1px solid {border}; border-radius:10px;">
+                <span style="font-size:1.2rem;">{icon}</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--text-muted);">{entry['time']}</span>
+                <span style="flex:1; font-size:0.82rem; color:var(--text-secondary);">{entry.get('filename', 'image')}</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-weight:700; color:{color};">{entry['confidence']:.1%}</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+
+# ========== FOOTER ==========
 st.markdown("""
-<div class="footer-premium">
+<div class="app-footer">
     <strong>SDIS 44</strong> \u2022 Service D\u00e9partemental d'Incendie et de Secours de Loire-Atlantique<br>
-    Vigie IA v1.0 \u2022 Prototype de recherche \u2022 Allaire & Loret \u2022 Sup de Vinci M1<br>
-    Pour toute urgence : <strong>18</strong> ou <strong>112</strong>
+    Vigie IA v2.0 \u2022 Allaire & Loret \u2022 Sup de Vinci Master 1 \u2022 2025-2026<br>
+    Urgences : <strong>18</strong> ou <strong>112</strong>
 </div>
 """, unsafe_allow_html=True)
