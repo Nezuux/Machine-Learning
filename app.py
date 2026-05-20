@@ -32,9 +32,9 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
     :root {
-        --bg-primary: #050810;
-        --bg-secondary: #0c1122;
-        --bg-card: rgba(12, 17, 34, 0.85);
+        --bg-primary: #0a0a0f;
+        --bg-secondary: #12121a;
+        --bg-card: rgba(18, 18, 30, 0.8);
         --border-glass: rgba(255, 255, 255, 0.06);
         --border-hover: rgba(99, 102, 241, 0.4);
         --text-primary: #f1f5f9;
@@ -54,7 +54,8 @@ st.markdown("""
 
     .stApp {
         font-family: 'Inter', -apple-system, sans-serif;
-        background: var(--bg-primary) !important;
+        background: linear-gradient(145deg, #0a0a0f 0%, #0d0618 25%, #10061a 50%, #0a1020 75%, #060d14 100%) !important;
+        background-attachment: fixed !important;
         color: var(--text-primary);
     }
 
